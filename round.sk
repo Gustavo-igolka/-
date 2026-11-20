@@ -27,6 +27,8 @@ function isManiac(charid: text) :: boolean:
         return true
     else if {_charid} is "blind":
         return true
+    else if {_charid} is "samurai":
+        return true
     else:
         return false
 
@@ -370,6 +372,8 @@ command /startround <text>:
                 give_project_kit({_p})
             else if {char.%{_p}%} is "blind":
                 give_blind_kit({_p})
+            else if {char.%{_p}%} is "samurai":
+                give_samurai_kit({_p})
             applyCharacterSkin({_p}, {char.%{_p}%})
 
         # --- Реванш-экран: показываем убийцу и карту заранее, даём время подготовиться ---
@@ -400,6 +404,8 @@ command /startround <text>:
                 apply an ambient potion effect of night vision to {_p} for 999999 seconds
                 if {char.%{_p}%} is "denden":
                     apply jump boost 2 to {_p} for 999999 seconds
+                else if {char.%{_p}%} is "samurai":
+                    samuraiSpawnBlessed({_p})
                 else if {char.%{_p}%} is "project":
                     # --- Пассивка 2: перманентное замедление, снимается только clear all potion effects в stopRound() ---
                     apply slowness 1 to {_p} for 999999 seconds
@@ -690,6 +696,16 @@ function stopRound(message: text):
     loop {necro.activeZombies::*}:
         kill loop-value
     delete {necro.activeZombies::*}
+
+    loop {samurai.blessed::*}:
+        kill loop-value
+    delete {samurai.blessed::*}
+    delete {samurai.blessedOwner::*}
+    delete {samurai.marked::*}
+    delete {samurai.grabbing::*}
+    delete {samurai.grabbed::*}
+    delete {samurai.switching::*}
+    delete {samurai.stunImmune::*}
 
     loop {denden.creepers::*}:
         kill loop-value
