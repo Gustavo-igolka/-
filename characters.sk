@@ -175,6 +175,8 @@ function give_samurai_kit(p: player):
     delete {samurai.grabbed.%{_p}%}
     delete {samurai.switching.%{_p}%}
     delete {samurai.stunImmune.%{_p}%}
+    delete {samurai.markToken.%{_p}%}
+    delete {samurai.switchToken.%{_p}%}
     give stone sword to {_p}
     give paper named "&cМетка" to {_p}
     give iron axe named "&4Разрезание" to {_p}
