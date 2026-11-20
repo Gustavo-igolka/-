@@ -2711,41 +2711,45 @@ on right click holding ender pearl:
 # Блаженный автономно выбирает ближайшего живого выжившего и атакует его.
 every 1 second:
     if {round.active} is true:
-        loop {samurai.blessed::*}:
-            set {_z} to loop-value
-            if {_z} is not alive:
-                remove {_z} from {samurai.blessed::*}
-                delete {samurai.blessedOwner.%{_z}%}
-                delete {samurai.blessedStunnedUntil.%{_z}%}
-            else:
-                set {_owner} to {samurai.blessedOwner.%{_z}%}
-                if {_owner} is online:
-                    if {samurai.blessedStunnedUntil.%{_z}%} is set:
-                        if {samurai.blessedStunnedUntil.%{_z}%} > now:
-                            set target of {_z} to {_owner}
+        if {round.live} is true:
+            loop {samurai.blessed::*}:
+                set {_z} to loop-value
+                if {_z} is not alive:
+                    remove {_z} from {samurai.blessed::*}
+                    delete {samurai.blessedOwner.%{_z}%}
+                    delete {samurai.blessedStunnedUntil.%{_z}%}
+                else:
+                    set {_owner} to {samurai.blessedOwner.%{_z}%}
+                    if {_owner} is online:
+                        if {samurai.blessedStunnedUntil.%{_z}%} is set:
+                            if {samurai.blessedStunnedUntil.%{_z}%} > now:
+                                set target of {_z} to {_owner}
+                            else:
+                                delete {samurai.blessedStunnedUntil.%{_z}%}
                         else:
-                            delete {samurai.blessedStunnedUntil.%{_z}%}
-                    else:
-                        set {_closest} to 9999
-                        delete {_target}
-                        loop all players:
-                            if loop-player is not {_owner}:
-                                if isManiac({char.%loop-player%}) is false:
-                                    if {alive.%loop-player%} is true:
-                                        set {_d} to distance between {_z} and loop-player
-                                        if {_d} < {_closest}:
-                                            set {_closest} to {_d}
-                                            set {_target} to loop-player
-                        if {_target} is set:
-                            set target of {_z} to {_target}
-                        else:
-                            set target of {_z} to {_owner}
+                            set {_closest} to 9999
+                            delete {_target}
+                            loop all players:
+                                if loop-player is not {_owner}:
+                                    if isManiac({char.%loop-player%}) is false:
+                                        if {alive.%loop-player%} is true:
+                                            set {_d} to distance between {_z} and loop-player
+                                            if {_d} < {_closest}:
+                                                set {_closest} to {_d}
+                                                set {_target} to loop-player
+                            if {_target} is set:
+                                set target of {_z} to {_target}
+                            else:
+                                set target of {_z} to {_owner}
 
 # Блаженный бессмертен, но удар живого выжившего временно оглушает его на 3 секунды.
 on damage:
     if victim is a zombie:
         if {samurai.blessedOwner.%victim%} is set:
             cancel event
+            if {round.active} is true:
+                if {round.live} is not true:
+                    stop
             if attacker is a player:
                 if isManiac({char.%attacker%}) is false:
                     set {samurai.blessedStunnedUntil.%victim%} to now + 3 seconds
