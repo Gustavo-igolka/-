@@ -39,6 +39,8 @@ function getCharDisplayName(charid: text) :: text:
         return "The Project"
     else if {_charid} is "blind":
         return "Незрячий"
+    else if {_charid} is "samurai":
+        return "Самураи"
     else:
         return {_charid}
 
@@ -49,6 +51,7 @@ function openManiacChoiceMenu(p: player):
     set slot 7 of {_inv} to trident named "&cАномалия"
     set slot 1 of {_inv} to iron axe named "&8The Project"
     set slot 4 of {_inv} to fermented spider eye named "&2Незрячий"
+    set slot 2 of {_inv} to stone sword named "&cСамураи"
     set {choose.inv.%{_p}%} to {_inv}
     set {choose.role.%{_p}%} to "maniac"
     open {_inv} to {_p}
@@ -95,6 +98,8 @@ on inventory click:
                     set {char.maniacPref.%player%} to "project"
                 else if clicked slot is 4:
                     set {char.maniacPref.%player%} to "blind"
+                else if clicked slot is 2:
+                    set {char.maniacPref.%player%} to "samurai"
                 else:
                     stop
                 close player's inventory
@@ -161,6 +166,19 @@ function give_blind_kit(p: player):
     give green dye named "&2Споровая завеса" to {_p}
     give fermented spider eye named "&cСлепая ярость" to {_p}
     give slime ball named "&aПрорастание" to {_p}
+
+# Самураи: каменный меч + три способности (Метка, Разрезание, Переключение).
+function give_samurai_kit(p: player):
+    clear inventory of {_p}
+    delete {samurai.marked.%{_p}%}
+    delete {samurai.grabbing.%{_p}%}
+    delete {samurai.grabbed.%{_p}%}
+    delete {samurai.switching.%{_p}%}
+    delete {samurai.stunImmune.%{_p}%}
+    give stone sword to {_p}
+    give paper named "&cМетка" to {_p}
+    give iron axe named "&4Разрезание" to {_p}
+    give ender pearl named "&5Переключение" to {_p}
 
 function give_andrey_kit(p: player):
     clear inventory of {_p}
