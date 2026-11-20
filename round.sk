@@ -702,6 +702,7 @@ function stopRound(message: text):
     delete {samurai.blessed::*}
     delete {samurai.blessedOwner::*}
     delete {samurai.marked::*}
+    delete {samurai.markToken::*}
     delete {samurai.grabbing::*}
     delete {samurai.grabbed::*}
     delete {samurai.switching::*}
