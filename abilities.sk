@@ -2614,6 +2614,10 @@ on right click holding iron axe:
                 set {_token} to now
                 set {samurai.grabbing.%player%} to true
                 set {samurai.grabbed.%{_target}%} to true
+                set {stunned.%player%} to true
+                set {staggered.%player%} to true
+                set {stunned.%{_target}%} to true
+                set {staggered.%{_target}%} to true
                 set {samurai.grabTarget.%player%} to {_target}
                 set {samurai.grabToken.%player%} to {_token}
                 send "&4Ты схватил %{_target}%! Удерживай его 6 секунд." to player
@@ -2625,6 +2629,10 @@ on right click holding iron axe:
                             if {alive.%{_target}%} is true:
                                 delete {samurai.grabbing.%player%}
                                 delete {samurai.grabbed.%{_target}%}
+                                delete {stunned.%player%}
+                                delete {staggered.%player%}
+                                delete {stunned.%{_target}%}
+                                delete {staggered.%{_target}%}
                                 delete {samurai.grabTarget.%player%}
                                 delete {samurai.grabToken.%player%}
                                 set {_kickDamage} to 4
@@ -2637,11 +2645,19 @@ on right click holding iron axe:
                             else:
                                 delete {samurai.grabbing.%player%}
                                 delete {samurai.grabbed.%{_target}%}
+                                delete {stunned.%player%}
+                                delete {staggered.%player%}
+                                delete {stunned.%{_target}%}
+                                delete {staggered.%{_target}%}
                                 delete {samurai.grabTarget.%player%}
                                 delete {samurai.grabToken.%player%}
                         else:
                             delete {samurai.grabbing.%player%}
                             delete {samurai.grabbed.%{_target}%}
+                            delete {stunned.%player%}
+                            delete {staggered.%player%}
+                            delete {stunned.%{_target}%}
+                            delete {staggered.%{_target}%}
                             delete {samurai.grabTarget.%player%}
                             delete {samurai.grabToken.%player%}
 
@@ -2764,12 +2780,18 @@ on death of a player:
                 set {_owner} to loop-player
         if {_owner} is set:
             delete {samurai.grabbing.%{_owner}%}
+            delete {stunned.%{_owner}%}
+            delete {staggered.%{_owner}%}
             delete {samurai.grabTarget.%{_owner}%}
             delete {samurai.grabToken.%{_owner}%}
         delete {samurai.grabbed.%victim%}
+        delete {stunned.%victim%}
+        delete {staggered.%victim%}
     if {samurai.grabbing.%victim%} is true:
         set {_target} to {samurai.grabTarget.%victim%}
         delete {samurai.grabbed.%{_target}%}
+        delete {stunned.%{_target}%}
+        delete {staggered.%{_target}%}
         delete {samurai.grabbing.%victim%}
         delete {samurai.grabTarget.%victim%}
         delete {samurai.grabToken.%victim%}
@@ -2779,12 +2801,18 @@ on quit:
         loop all players:
             if {samurai.grabTarget.%loop-player%} is player:
                 delete {samurai.grabbing.%loop-player%}
+                delete {stunned.%loop-player%}
+                delete {staggered.%loop-player%}
                 delete {samurai.grabTarget.%loop-player%}
                 delete {samurai.grabToken.%loop-player%}
         delete {samurai.grabbed.%player%}
+        delete {stunned.%player%}
+        delete {staggered.%player%}
     if {samurai.grabbing.%player%} is true:
         set {_target} to {samurai.grabTarget.%player%}
         delete {samurai.grabbed.%{_target}%}
+        delete {stunned.%{_target}%}
+        delete {staggered.%{_target}%}
         delete {samurai.grabbing.%player%}
         delete {samurai.grabTarget.%player%}
         delete {samurai.grabToken.%player%}
