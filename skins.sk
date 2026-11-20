@@ -150,7 +150,7 @@ function getChaseDuration(p: player, charid: text) :: number:
 function stopChaseMusic(p: player):
     if {chase.activeSound} is set:
         execute console command "/stopsound %{_p}% * %{chase.activeSound}%"
-    set {_ids::*} to "denden", "necromancer", "anomaly", "project" and "blind"
+    set {_ids::*} to "denden", "necromancer", "anomaly", "project", "blind" and "samurai"
     loop {_ids::*}:
         if {chase.sound.%loop-value%} is set:
             execute console command "/stopsound %{_p}% * %{chase.sound.%loop-value%}%"
@@ -188,6 +188,8 @@ function getCharIcon(charid: text) :: item type:
         return iron axe
     else if {_charid} is "blind":
         return fermented spider eye
+    else if {_charid} is "samurai":
+        return stone sword
     else:
         return player head
 
@@ -307,6 +309,7 @@ function openSkinCharSelect(p: player, mode: text):
     set slot 2 of {_inv} to getCharIcon("anomaly") named "&cАномалия"
     set slot 3 of {_inv} to getCharIcon("project") named "&8The Project"
     set slot 4 of {_inv} to getCharIcon("blind") named "&2Незрячий"
+    set slot 5 of {_inv} to getCharIcon("samurai") named "&cСамураи"
     set slot 9 of {_inv} to getCharIcon("andrey") named "&aАндрей"
     set slot 10 of {_inv} to getCharIcon("hacker") named "&bРататуй"
     set slot 11 of {_inv} to getCharIcon("kirill") named "&aКирилл"
@@ -333,6 +336,8 @@ function charidForSlot(slot: number) :: text:
         return "project"
     else if {_slot} is 4:
         return "blind"
+    else if {_slot} is 5:
+        return "samurai"
     else if {_slot} is 9:
         return "andrey"
     else if {_slot} is 10:
