@@ -2146,20 +2146,26 @@ function projectSlowWalk(p: player, speed: number, d: timespan):
 #     поэтому во время стана/заморозки сбрасываем горизонтальную скорость.
 #     Вертикаль не трогаем — падение с высоты работает как обычно. ---
 every 1 tick:
+    delete {project.freezeLockReset}
     loop all players:
-        # В цикле loop-player не поддерживается как цель для velocity,
-        # поэтому копируем его в локальную переменную.
         set {_p} to loop-player
         # Стан (stunPlayer) — через walk speed 0 + freezeToken
         # Оглушение маньяка (freezeManiacWalk) — walk speed 0 без токена
         if {project.freezeToken.%{_p}%} is set or walk speed of {_p} is 0:
-            # Skript (Bukkit) не имеет свойства "horizontal velocity" —
-            # читаем полный вектор скорости, обнуляем только X/Z, вертикаль
-            # (Y) не трогаем, чтобы падение с высоты работало как обычно.
-            set {_v} to velocity of {_p}
-            set x coordinate of {_v} to 0
-            set z coordinate of {_v} to 0
-            set velocity of {_p} to {_v}
+            # Skript (Bukkit) не умеет менять скорость игрока напрямую
+            # ("velocity" — только для чтения, "horizontal velocity"
+            # отсутствует). Поэтому при прыжке замороженного игрока
+            # ставим его на его же текущую позицию: телепорт сбрасывает
+            # горизонтальный импульс (X/Z), а вертикаль (Y) не трогается —
+            # гравитация и падение с высоты работают как обычно.
+            # Флаг freezeLockReset гарантирует, что за один тик выполнится
+            # только один такой "нулевой" телепорт (безопасно даже если в
+            # будущем появится обработчик on teleport).
+            set {_vv} to vertical velocity of {_p}
+            if {_vv} is greater than 0:
+                if {project.freezeLockReset} is not true:
+                    set {project.freezeLockReset} to true
+                    teleport {_p} to location of {_p}
 
 # ===========================================================
 # Способность 1 — Челюсти (bone, КД 40 сек)
