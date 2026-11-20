@@ -83,7 +83,7 @@ function anomalyStalkBlind(p: player):
     loop all players within 7 blocks of {_p}:
         if loop-player is not {_p}:
             if isManiac({char.%loop-player%}) is false:
-                apply blindness to loop-player for 3 seconds
+                execute console command "minecraft:effect give %name of loop-player% minecraft:blindness 3 0 true"
                 add 1 to {_hit}
     loop {dummy.list::*}:
         if {dummy.kind.%loop-value%} is "survivor":
@@ -1399,10 +1399,10 @@ on right click holding stick:
                         set {_hit} to true
                 if {_hit} is true:
                     anomalyBeam(player, distance between player and {_target})
-                    apply blindness to {_target} for 2 seconds
                     apply glowing to {_target} for 2 seconds
                     send "&cЛуч попал: урон, слепота и свечение на 2 сек!" to player
                     if {_target} is a player:
+                        execute console command "minecraft:effect give %name of {_target}% minecraft:blindness 2 0 true"
                         damage {_target} by 2
                         awardXP(player, "anomaly", 30)
                     else:
