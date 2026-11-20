@@ -706,6 +706,9 @@ function stopRound(message: text):
     delete {samurai.grabbed::*}
     delete {samurai.switching::*}
     delete {samurai.stunImmune::*}
+    delete {samurai.blessedStunnedUntil::*}
+    delete {samurai.grabTarget::*}
+    delete {samurai.grabToken::*}
 
     loop {denden.creepers::*}:
         kill loop-value
