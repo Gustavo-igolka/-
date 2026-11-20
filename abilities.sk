@@ -2142,6 +2142,18 @@ function projectSlowWalk(p: player, speed: number, d: timespan):
         delete {project.freezeToken.%{_p}%}
         set walk speed of {_p} to 0.2
 
+# --- Баланс: walk speed 0 не блокирует прыжок (Space в воздухе даёт импульс),
+#     поэтому во время стана/заморозки сбрасываем горизонтальную скорость.
+#     Вертикаль не трогаем — падение с высоты работает как обычно. ---
+every 1 tick:
+    loop all players:
+        # Стан (stunPlayer) — через walk speed 0 + freezeToken
+        if {project.freezeToken.%loop-player%} is set:
+            set horizontal velocity of loop-player to 0
+        # Оглушение маньяка (freezeManiacWalk) — walk speed 0 без токена
+        else if walk speed of loop-player is 0:
+            set horizontal velocity of loop-player to 0
+
 # ===========================================================
 # Способность 1 — Челюсти (bone, КД 40 сек)
 #
