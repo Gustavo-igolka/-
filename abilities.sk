@@ -2575,10 +2575,16 @@ on right click holding paper:
                 stop
             if tryCooldown(player, "samurai_mark", 30) is true:
                 set {samurai.marked.%player%} to {_target}
+                set {_markToken} to now
+                set {samurai.markToken.%player%} to {_markToken}
                 apply glowing to {_target} for 15 seconds
                 send "&cМетка поставлена на %{_target}% на 15 секунд." to player
                 send "&cСамураи пометили тебя! Получаемый от них урон повышен." to {_target}
                 awardXP(player, "samurai", 20)
+                wait 15 seconds
+                if {samurai.markToken.%player%} is {_markToken}:
+                    delete {samurai.marked.%player%}
+                    delete {samurai.markToken.%player%}
 
 # Разрезание: ближайший выживший в пределах 3 блоков обездвиживается вместе с убийцей.
 on right click holding iron axe:
