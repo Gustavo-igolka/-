@@ -2553,7 +2553,11 @@ on player move:
 
 # Блокируем использование любых предметов участниками захвата/переключения.
 on right click:
-    if {samurai.grabbing.%player%} is true or {samurai.grabbed.%player%} is true or {samurai.switching.%player%} is true:
+    if {samurai.grabbing.%player%} is true:
+        cancel event
+    if {samurai.grabbed.%player%} is true:
+        cancel event
+    if {samurai.switching.%player%} is true:
         cancel event
 
 # Метка: выбранный игрок подсвечивается 15 сек; урон Самураев по нему +0,5.
@@ -2570,7 +2574,10 @@ on right click holding paper:
             if {_target} is not a player:
                 send "&7Наведи прицел на выжившего, чтобы поставить Метку." to player
                 stop
-            if isManiac({char.%{_target}%}) is true or {alive.%{_target}%} is false:
+            if isManiac({char.%{_target}%}) is true:
+                send "&7Метка ставится только на живого выжившего." to player
+                stop
+            if {alive.%{_target}%} is not true:
                 send "&7Метка ставится только на живого выжившего." to player
                 stop
             if tryCooldown(player, "samurai_mark", 30) is true:
