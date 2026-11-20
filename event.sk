@@ -1,0 +1,306 @@
+# =========================================================
+# event_misha.sk — Ивент: День рождения Михуилонга
+# =========================================================
+
+# 1. Включение/выключение ивента (команда /eventplay)
+command /eventplay:
+    permission: op
+    trigger:
+        if {event.misha.active} is not set:
+            set {event.misha.active} to false
+
+        if {event.misha.active} is true:
+            set {event.misha.active} to false
+            delete {event.misha.br_next}
+
+            # если ивент выключают посреди уже идущего Батл Рояля — раньше
+            # раунд просто зависал (урон гасился общей защитой из
+            # abilities.sk, а конец раунда никогда не наступал). Теперь
+            # принудительно завершаем раунд.
+            if {event.misha.br_active} is true:
+                set {event.misha.br_active} to false
+                if {round.active} is true:
+                    stopRound("&cИвент выключен посреди Батл Рояля — раунд принудительно остановлен.")
+
+            broadcast "&cИвент &bДень рождения Миши &cвыключен. Все режимы возвращены в норму."
+        else:
+            set {event.misha.active} to true
+            set {event.misha.br_next} to false
+            broadcast "&e🎉 Ивент &bДень рождения Миши &eВКЛЮЧЕН! С днём рождения, Михуилонг! 🎉"
+
+# --- Единая точка расширения: "идёт хоть какой-то ивент?" ---
+# Сейчас ивент один (день рождения Миши), но функция вынесена отдельно,
+# чтобы праздничный ЛМС-трек (см. секцию 8) не пришлось трогать, если
+# позже добавится второй/третий ивент — просто дописать "or" сюда.
+function isAnyEventActive() :: boolean:
+    if {event.misha.active} is true:
+        return true
+    return false
+
+# 2. Установка точек для режима Батл Рояль
+command /seteventbatlmod <text>:
+    permission: op
+    trigger:
+        set {_map} to arg-1
+        if {_map} is not set:
+            send "&cИспользование: /seteventbatlmod <карта>" to player
+            stop
+        add location of player to {event.br_spawns::%{_map}%::*}
+        send "&aТочка спавна для Батл Рояля на карте %{_map}% установлена! (Всего: %size of {event.br_spawns::%{_map}%::*}%)" to player
+
+# 3. Во время ивента Миши в GUI выбора выжившего (/choosesurvivor — не
+# важно, открыт он командой или предметом в лобби) доступен только
+# Михуилонг. Это и есть шутка ("в этот день все остальные отдыхают") —
+# она про ВЕСЬ ивент целиком, а не про конкретный тип раунда, поэтому
+# условия на {event.misha.br_next} тут больше нет.
+# Выбор МАНЬЯКА (/choosemaniac, звезда) этот блок не трогает вообще —
+# там всегда свободный выбор, без исключений, никогда не форсится.
+#
+# Перехват стоит на "on inventory open" (момент открытия меню), а не на
+# клике внутри него — так работает одинаково для обоих способов открыть
+# меню, и не конфликтует с обработчиком клика в characters.sk (тот
+# просто никогда не увидит открытое меню — оно закрывается раньше, чем
+# игрок успевает по чему-то кликнуть).
+on inventory open:
+    if {event.misha.active} is true:
+        if name of event-inventory is "&aВыживший (предпочтение)":
+            cancel event
+            set {char.survivorPref.%player%} to "mihuilong"
+            send "&cУпс... Видимо в этот день все остальные отдыхают — автоматически выбираем Михуилонга." to player
+
+# 4. Чередование режимов (Батл Рояль и Обычная игра) — ОБЩАЯ механика.
+# Перехватываем команду старта раунда, введённую ИГРОКОМ в чат.
+on command "startround":
+    # Guard: если эту команду только что сама вызвала autoStartRound() —
+    # значит решение по br_next уже принято там, повторно тут не решаем
+    # (иначе на некоторых сборках "on command" ловит и консольные вызовы
+    # тоже, и получается двойная обработка — из-за неё БР зацикливался).
+    if {event.misha.autoTriggered} is true:
+        stop
+
+    if {event.misha.active} is true:
+        if {event.misha.br_next} is true:
+            cancel event
+            set {event.misha.br_next} to false
+            # Ждем 1 тик, чтобы избежать конфликтов команд, затем запускаем БР
+            wait 1 tick
+            startBattleRoyale("random")
+        else:
+            # Следующий раунд будет Батл Роялем
+            set {event.misha.br_next} to true
+
+# "on command" в Skript по документации должен ловить только команды,
+# введённые ИГРОКОМ — но судя по багу с бесконечным БР через autoround,
+# похоже, на этой сборке он ловит ещё и консольные вызовы (это и вызывало
+# зацикливание, когда логика чередования была продублирована и тут, и в
+# перехватчике выше — они начинали конфликтовать). Поэтому здесь та же
+# полная логика чередования (на случай, если консоль всё-таки НЕ ловится
+# и её действительно нужно обрабатывать отдельно), но обёрнутая в
+# {event.misha.autoTriggered} — флаг, который перехватчик выше проверяет
+# первым делом и, если он true, ничего не делает. Работает в обоих
+# случаях: ловит "on command" консоль или нет.
+function autoStartRound(mapArg: text):
+    set {event.misha.autoTriggered} to true
+
+    if {event.misha.active} is true:
+        if {event.misha.br_next} is true:
+            set {event.misha.br_next} to false
+            delete {event.misha.autoTriggered}
+            startBattleRoyale({_mapArg})
+            stop
+        else:
+            set {event.misha.br_next} to true
+
+    execute console command "/startround %{_mapArg}%"
+    wait 1 tick
+    delete {event.misha.autoTriggered}
+
+# 5. Логика запуска Батл Рояля — ОБЩАЯ механика, ни на кого не завязана.
+# Каждый играет за СВОЙ выбранный персонаж (survivorPref, дефолт —
+# андрей). Пока идёт ивент Миши, у всех и так будет "mihuilong" — это
+# гарантирует секция 3 (GUI просто не даёт выбрать никого другого), сюда
+# это никак не протаскивается напрямую.
+# Бой всё ещё держится на общем деревянном мече (секция 6) — иначе
+# персонажи без боевого оружия в ките (Андрей, Рататуй, МякШмяка, Саня)
+# не смогли бы участвовать в рубке вообще.
+function startBattleRoyale(mapArgs: text):
+    set {_map} to {_mapArgs}
+    if {_map} is "random":
+        set {_i} to a random integer between 1 and size of {maps::*}
+        set {_map} to {maps::%{_i}%}
+
+    if size of {event.br_spawns::%{_map}%::*} is 0:
+        broadcast "&cДля Батл Рояля на карте '%{_map}%' нет точек. Используй /seteventbatlmod %{_map}%"
+        stop
+
+    # минимум 2 игрока онлайн — иначе условие победы (проверяется только в
+    # обработчике смерти) никогда не выполнится, и раунд повиснет навсегда
+    set {_playerCount} to 0
+    loop all players:
+        add 1 to {_playerCount}
+    if {_playerCount} < 2:
+        broadcast "&cДля Батл Рояля нужно минимум 2 игрока онлайн."
+        stop
+
+    set {event.misha.br_active} to true
+    set {round.active} to true
+    set {round.live} to true
+    set {round.map} to {_map}
+    set {round.survivorsAlive} to 0
+
+    if {round.id} is not set:
+        set {round.id} to 0
+    add 1 to {round.id}
+
+    delete {ambient.nextPlay}
+    delete {round.maniac}
+    delete {round.maniacName}
+
+    # Выдача наборов и спавн
+    loop all players:
+        execute console command "/team join hide_names %loop-player%"
+        if {menu.music.sound} is set:
+            execute console command "/stopsound %loop-player% * %{menu.music.sound}%"
+
+        set {_charid} to "andrey"
+        if {char.survivorPref.%loop-player%} is set:
+            set {_charid} to {char.survivorPref.%loop-player%}
+        set {char.%loop-player%} to {_charid}
+
+        clear inventory of loop-player
+        set max health of loop-player to 10
+        wait 1 tick
+        set health of loop-player to 10
+
+        # Выдаём выбранный кит (может ещё раз поменять max health под
+        # конкретного персонажа — Илья/Томас/Маёр/Саня — это ожидаемо)
+        giveSurvivorKit(loop-player, {_charid})
+        applyCharacterSkin(loop-player, {_charid})
+        give wooden sword named "&cДеревянный меч (Батл Рояль)" to loop-player
+
+        # Спавн на точках БР
+        set {_i} to a random integer between 1 and size of {event.br_spawns::%{_map}%::*}
+        teleport loop-player to {event.br_spawns::%{_map}%::%{_i}%}
+
+        add 1 to {round.survivorsAlive}
+        set {alive.%loop-player%} to true
+        set gamemode of loop-player to adventure
+
+    execute console command "/gamerule naturalRegeneration false"
+    broadcast "&4&lБАТЛ РОЯЛЬ НАЧАЛСЯ &7на карте &f%{_map}%"
+    broadcast "&eУбийца и генераторы отключены. Каждый сам за себя — рубилово до последнего выжившего!"
+
+# 6. Механики Батл Рояля
+
+# Отключение генераторов
+on right click on anvil:
+    if {event.misha.br_active} is true:
+        cancel event
+        send "&cВ режиме Батл Рояль генераторы отключены!" to player
+
+# Урон и кастомная смерть — один блок, чтобы "смерть" никогда не
+# засчитывалась по удару, который сам по себе был отменён (например,
+# голым кулаком): смерть проверяется только для реального удара
+# деревянным мечом, засчитанного этим же блоком чуть выше.
+# ВАЖНО: без явного приоритета (у твоего Skript не парсится "priority
+# highest") — сработает после глобальной защиты из abilities.sk только
+# благодаря тому, что event.sk грузится позже неё по алфавиту (e > a).
+# Если когда-нибудь переименуешь файл так, что порядок сломается —
+# нужно будет поискать другой способ гарантировать порядок.
+on damage:
+    if {event.misha.br_active} is true:
+        if attacker is a player:
+            if victim is a player:
+                set {_legitHit} to false
+
+                # Неуязвимость Андрея (зелье) действует и в БР — раньше эта
+                # проверка была только в глобальном хендлере abilities.sk,
+                # а наш блок её перекрывал безусловным uncancel.
+                if {andrey.invincible.%victim%} is true:
+                    cancel event
+                    stop
+
+                # Меч оглушения Михуилонга (если у игрока такой персонаж) —
+                # работает на любого другого выжившего, не наносит урона
+                else if name of attacker's tool is "&9Меч оглушения":
+                    cancel event
+                    if tryCooldown(attacker, "mihu_stun", 20) is true:
+                        send "&9Ты оглушил противника!" to attacker
+                        stunPlayer(victim, 5 seconds)
+                        apply slowness 2 to attacker for 2 seconds
+
+                # Урон наносится только общим деревянным мечом Батл Рояля.
+                # Механика по образу каменного меча маньяка (abilities.sk):
+                # тяжёлый одиночный удар, 5 сек кулдаун между хитами, бьющий
+                # не может ударить пока оглушён/ошеломлён.
+                # Если удар уже обработан отдельной способностью раньше по
+                # цепочке (например, успешное Перри Маёра — abilities.sk
+                # грузится раньше и цепляет hit первым) — не перебиваем её
+                # решение отменить урон.
+                else if attacker's tool is wooden sword:
+                    if {mayor.parryBlocked.%victim%} is true:
+                        delete {mayor.parryBlocked.%victim%}
+                    else if {stunned.%attacker%} is true:
+                        cancel event
+                    else if {staggered.%attacker%} is true:
+                        cancel event
+                    else if tryCooldown(attacker, "br_melee", 5) is false:
+                        cancel event
+                    else:
+                        uncancel event
+                        set {_legitHit} to true
+
+                # Любой другой предмет не наносит урона
+                else:
+                    cancel event
+
+                if {_legitHit} is true:
+                    if damage >= health of victim:
+                        cancel event
+                        set {alive.%victim%} to false
+                        set gamemode of victim to spectator
+                        remove 1 from {round.survivorsAlive}
+
+                        execute console command "/title %victim% title {""text"":""Вы погибли!"",""color"":""red""}"
+                        broadcast "&c☠ %victim% выбыл из битвы! Осталось: %{round.survivorsAlive}%"
+
+                        # Победа
+                        if {round.survivorsAlive} <= 1:
+                            set {_winner} to "Никто"
+                            loop all players:
+                                if {alive.%loop-player%} is true:
+                                    set {_winner} to loop-player
+                            set {event.misha.br_active} to false
+                            stopRound("&6&l🏆 %{_winner}% &eпобедил в Королевской Битве!")
+
+                        # БР ЛМС: остались ровно двое
+                        else if {round.survivorsAlive} is 2:
+                            startBrFinalDuel()
+
+# 7. ЛМС Батл Рояля — срабатывает, когда в живых остаётся ровно двое.
+# В отличие от обычного ЛМС тут нет "стороны маньяка" и таймера победы по
+# истечении времени — раунд и так закончится по факту смерти одного из
+# двоих через обычную логику выше. Только подсветка (12 сек, как и везде) и анонс.
+function startBrFinalDuel():
+    delete {_p1}
+    delete {_p2}
+    loop all players:
+        if {alive.%loop-player%} is true:
+            if {_p1} is not set:
+                set {_p1} to loop-player
+            else if {_p2} is not set:
+                set {_p2} to loop-player
+    if {_p1} is set:
+        if {_p2} is set:
+            broadcast "&4&l— ФИНАЛЬНАЯ ДУЭЛЬ БАТЛ РОЯЛЯ —"
+            apply glowing to {_p1} for 12 seconds
+            apply glowing to {_p2} for 12 seconds
+
+# 8. Слои ЛМС (сюжетные пары, кастомные скины, Big Game, праздничный,
+# обычный) переехали в lms.sk — там же playLmsTrack(). Отсюда он берёт
+# только isAnyEventActive() (выше): идёт любой ивент -> играет праздничный.
+
+# Подстраховка очистки переменной при ручной остановке
+on command "endround":
+    if {event.misha.br_active} is true:
+        set {event.misha.br_active} to false

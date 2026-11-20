@@ -1,0 +1,511 @@
+# =========================================================
+# skins.sk — система скинов персонажей поверх SkinsRestorer.
+#
+# ВАЖНО: этот файл сам по себе ничего не устанавливает. Прежде чем он
+# заработает, каждый скин (классический id персонажа + все альт-скины,
+# включая милстоун-скины вида "charid_1m") нужно один раз создать
+# командой /sr createcustom в SkinsRestorer.
+#
+# Три источника скина у персонажа:
+#   1. Классический — id самого персонажа (denden, hacker, ...), открыт
+#      всегда всем, ничего разлочивать не нужно. Это тоже скин — он
+#      всегда первым в списке в /skins и /skinshop.
+#   2. Милстоун-скины — "charid_1m"/"_2m"/"_3m"/"_4m" (по номеру
+#      милстоуна: 1m = 25 ур., 2m = 50 ур., 3m = 75 ур., 4m = 100 ур.).
+#      Разлочиваются БЕСПЛАТНО при достижении уровня персонажа
+#      (см. unlockMilestone() в levels.sk). В магазине НЕ показываются
+#      и купить их нельзя — только уровнем.
+#   3. Магазинные — произвольные id, регистрируются админом через
+#      /addshopskin и покупаются за деньги через /skinshop.
+#
+# Разлоченные скины (2 и 3) хранятся в {unlocked.skin.%p%.%charid%.%skinid%}.
+# Какой скин НАДЕТ на персонажа сейчас — {selected.skin.%p%.%charid%},
+# по умолчанию (если не выбирали) — классический.
+#
+# Меню (см. секцию GUI ниже) везде работает в 2 экрана: сначала выбор
+# персонажа, потом список ЕГО скинов. /skinshop показывает классику
+# (не продаётся, просто видно что уже есть) и магазинные скины —
+# милстоуны в магазине не отображаются вообще. /skins показывает всё:
+# классику, милстоуны (открыт/заблокирован) и магазинные (куплен/нет).
+#
+# Необязательные добавки к скинам (все хранятся по ключу charid + skinid):
+#   * приписка (/setskinnote) — текст в описании скина в /skins и /skinshop;
+#   * своя музыка погони — только у скинов убийц (/setskinchase);
+#   * ЛМС: одиночный, парный, тематический — см. lms.sk (там же слои ЛМС).
+# Классический скин имеет skinid == charid, так что добавки доступны и ему.
+# То, что реально НАДЕТО в раунде, запоминается в {worn.skin.%p%} — по нему
+# работают погоня и ЛМС, чтобы смена выбора в /skins посреди раунда ничего не ломала.
+#
+# getCharSkinName() — единственное место, которое решает, что физически
+# надеть на игрока при выдаче кита. Остальной код (applyCharacterSkin,
+# хуки в round.sk/event.sk) не трогается.
+# =========================================================
+
+# --- Разлок / выбор ---
+
+# Номер милстоуна по уровню: 25→1, 50→2, 75→3, 100→4. Итоговый id — "charid_Nm".
+function milestoneSkinId(charid: text, level: number) :: text:
+    set {_index} to 1
+    if {_level} is 50:
+        set {_index} to 2
+    else if {_level} is 75:
+        set {_index} to 3
+    else if {_level} is 100:
+        set {_index} to 4
+    return "%{_charid}%_%{_index}%m"
+
+# Классический скин всегда считается разлоченным
+function isSkinUnlocked(p: player, charid: text, skinid: text) :: boolean:
+    if {_skinid} is {_charid}:
+        return true
+    if {unlocked.skin.%{_p}%.%{_charid}%.%{_skinid}%} is true:
+        return true
+    return false
+
+function unlockSkin(p: player, charid: text, skinid: text):
+    set {unlocked.skin.%{_p}%.%{_charid}%.%{_skinid}%} to true
+
+function getSelectedSkin(p: player, charid: text) :: text:
+    if {selected.skin.%{_p}%.%{_charid}%} is set:
+        # защита: если скин каким-то образом больше не разлочен — откатываемся к классике
+        if isSkinUnlocked({_p}, {_charid}, {selected.skin.%{_p}%.%{_charid}%}) is true:
+            return {selected.skin.%{_p}%.%{_charid}%}
+    return {_charid}
+
+function selectSkin(p: player, charid: text, skinid: text):
+    if isSkinUnlocked({_p}, {_charid}, {_skinid}) is true:
+        set {selected.skin.%{_p}%.%{_charid}%} to {_skinid}
+
+# --- Применение скина (без изменений в интерфейсе — вызывается как раньше) ---
+
+function getCharSkinName(p: player, charid: text) :: text:
+    return getSelectedSkin({_p}, {_charid})
+
+function applyCharacterSkin(p: player, charid: text):
+    if {_charid} is set:
+        set {_skinName} to getCharSkinName({_p}, {_charid})
+        set {worn.skin.%{_p}%} to {_skinName}
+        set {worn.skinchar.%{_p}%} to {_charid}
+        execute {_p} command "/skin %{_skinName}%"
+
+function resetPlayerSkin(p: player):
+    delete {worn.skin.%{_p}%}
+    delete {worn.skinchar.%{_p}%}
+    execute {_p} command "/skin clear"
+
+# Скин, надетый на игрока в этом раунде. Если не надевали (или персонаж
+# другой) — классический, то есть id персонажа.
+function getWornSkin(p: player, charid: text) :: text:
+    if {worn.skin.%{_p}%} is set:
+        if {worn.skinchar.%{_p}%} is {_charid}:
+            return {worn.skin.%{_p}%}
+    return {_charid}
+
+# --- Приписка к скину ---
+function getSkinNote(charid: text, skinid: text) :: text:
+    if {skin.note.%{_charid}%.%{_skinid}%} is set:
+        return {skin.note.%{_charid}%.%{_skinid}%}
+    return ""
+
+function sendSkinNote(p: player, charid: text, skinid: text):
+    set {_note} to getSkinNote({_charid}, {_skinid})
+    if {_note} is not "":
+        send colored "&8» &7%{_note}%" to {_p}
+
+# --- Своя музыка погони (скин убийцы). Нет у скина — берётся трек
+#     персонажа из /setchasemusic. Пустая строка = погони нет вообще. ---
+# Какой скин держит настройки погони для данного: свой, а если своих нет —
+# парный милстоун (скины убийц _3m и _4m делят одну тему погони).
+# Возвращает "" если ни у него, ни у парного темы нет.
+function chaseSourceSkin(charid: text, skin: text) :: text:
+    if {skin.chase.sound.%{_charid}%.%{_skin}%} is set:
+        return {_skin}
+    set {_m3} to "%{_charid}%_3m"
+    set {_m4} to "%{_charid}%_4m"
+    set {_alt} to ""
+    if {_skin} is {_m3}:
+        set {_alt} to {_m4}
+    else if {_skin} is {_m4}:
+        set {_alt} to {_m3}
+    if {_alt} is not "":
+        if {skin.chase.sound.%{_charid}%.%{_alt}%} is set:
+            return {_alt}
+    return ""
+
+function getChaseSound(p: player, charid: text) :: text:
+    set {_src} to chaseSourceSkin({_charid}, getWornSkin({_p}, {_charid}))
+    if {_src} is not "":
+        return {skin.chase.sound.%{_charid}%.%{_src}%}
+    if {chase.sound.%{_charid}%} is set:
+        return {chase.sound.%{_charid}%}
+    return ""
+
+function getChaseDuration(p: player, charid: text) :: number:
+    set {_src} to chaseSourceSkin({_charid}, getWornSkin({_p}, {_charid}))
+    if {_src} is not "":
+        return {skin.chase.dur.%{_charid}%.%{_src}%}
+    return {chase.duration.%{_charid}%}
+
+# Гасит трек погони (тот, что играл в этом раунде, + треки персонажей).
+function stopChaseMusic(p: player):
+    if {chase.activeSound} is set:
+        execute console command "/stopsound %{_p}% * %{chase.activeSound}%"
+    set {_ids::*} to "denden", "necromancer", "anomaly", "project" and "blind"
+    loop {_ids::*}:
+        if {chase.sound.%loop-value%} is set:
+            execute console command "/stopsound %{_p}% * %{chase.sound.%loop-value%}%"
+
+# --- Иконка персонажа для GUI (те же предметы, что в /choosemaniac, /choosesurvivor, /levels) ---
+
+function getCharIcon(charid: text) :: item type:
+    if {_charid} is "denden":
+        return stone sword
+    else if {_charid} is "necromancer":
+        return bow
+    else if {_charid} is "anomaly":
+        return trident
+    else if {_charid} is "andrey":
+        return bow
+    else if {_charid} is "hacker":
+        return clock
+    else if {_charid} is "mihuilong":
+        return iron sword
+    else if {_charid} is "ilya":
+        return wooden sword
+    else if {_charid} is "mayor":
+        return golden sword
+    else if {_charid} is "alexey":
+        return sugar
+    else if {_charid} is "thomas":
+        return bow
+    else if {_charid} is "sanya":
+        return iron nugget
+    else if {_charid} is "kirill":
+        return leather
+    else if {_charid} is "dartikil":
+        return crossbow
+    else if {_charid} is "project":
+        return iron axe
+    else if {_charid} is "blind":
+        return fermented spider eye
+    else:
+        return player head
+
+# =========================================================
+# МАГАЗИН — админ-команды регистрации покупных скинов.
+# =========================================================
+
+command /addshopskin <text> <text> <number>:
+    permission: op
+    trigger:
+        set {_charid} to arg-1
+        set {_skinid} to arg-2
+        set {_price} to arg-3
+        set {_exists} to false
+        loop {shop.skinlist.%{_charid}%::*}:
+            if loop-value is {_skinid}:
+                set {_exists} to true
+        if {_exists} is false:
+            add {_skinid} to {shop.skinlist.%{_charid}%::*}
+        set {shop.skin.%{_charid}%.%{_skinid}%.price} to {_price}
+        send "&aСкин '%{_skinid}%' для '%{_charid}%' добавлен в магазин за %{_price}%." to player
+
+command /removeshopskin <text> <text>:
+    permission: op
+    trigger:
+        set {_charid} to arg-1
+        set {_skinid} to arg-2
+        remove {_skinid} from {shop.skinlist.%{_charid}%::*}
+        delete {shop.skin.%{_charid}%.%{_skinid}%.price}
+        send "&aСкин '%{_skinid}%' убран из магазина '%{_charid}%'." to player
+
+command /listshopskins <text>:
+    permission: op
+    trigger:
+        set {_charid} to arg-1
+        if size of {shop.skinlist.%{_charid}%::*} is 0:
+            send "&cДля '%{_charid}%' скинов в магазине нет." to player
+            stop
+        send "&e&lСкины в магазине для %{_charid}%:" to player
+        loop {shop.skinlist.%{_charid}%::*}:
+            send "&7- &f%loop-value% &7— &6%{shop.skin.%{_charid}%.%loop-value%.price}%" to player
+
+# =========================================================
+# Добавки к скинам — админ-команды (ЛМС-команды лежат в lms.sk).
+# =========================================================
+
+# Приписка: слова в тексте — через "_" или весь текст в кавычках.
+# Цвета — &-кодами, например: /setskinnote denden denden_1m "&6Награда_за_25_уровень"
+command /setskinnote <text> <text> <text>:
+    permission: op
+    trigger:
+        set {_note} to arg-3
+        replace all "_" with " " in {_note}
+        set {skin.note.%arg-1%.%arg-2%} to {_note}
+        send colored "&aПриписка для %arg-1%/%arg-2%: &7%{_note}%" to player
+
+command /clearskinnote <text> <text>:
+    permission: op
+    trigger:
+        delete {skin.note.%arg-1%.%arg-2%}
+        send "&aПриписка для %arg-1%/%arg-2% убрана." to player
+
+# Своя тема погони — только скины убийц. Длительность — точная длина файла
+# в секундах (как в /setchasemusic), по ней трек зацикливается.
+command /setskinchase <text> <text> <text> <number>:
+    permission: op
+    trigger:
+        if isManiac(arg-1) is not true:
+            send "&cТема погони бывает только у скинов убийц." to player
+            stop
+        set {skin.chase.sound.%arg-1%.%arg-2%} to arg-3
+        set {skin.chase.dur.%arg-1%.%arg-2%} to arg-4
+        send "&aТема погони скина %arg-1%/%arg-2%: %arg-3% (цикл %arg-4% сек)." to player
+        if arg-2 is "%arg-1%_3m" or "%arg-1%_4m":
+            send "&7Скины _3m и _4m делят одну тему погони — вторая настраивать не нужно." to player
+
+# Снимает с одного скина погоню, одиночный ЛМС и тему (приписку и
+# пары — отдельными командами: /clearskinnote, /clearskinlmspair).
+command /clearskinextras <text> <text>:
+    permission: op
+    trigger:
+        delete {skin.chase.sound.%arg-1%.%arg-2%}
+        delete {skin.chase.dur.%arg-1%.%arg-2%}
+        delete {skin.lmsSolo.%arg-1%.%arg-2%}
+        delete {skin.theme.%arg-1%.%arg-2%}
+        send "&aПогоня, одиночный ЛМС и тема скина %arg-1%/%arg-2% сняты." to player
+
+# Что настроено у скина.
+command /skininfo <text> <text>:
+    permission: op
+    trigger:
+        set {_c} to arg-1
+        set {_s} to arg-2
+        send "&e&lСкин %{_c}%/%{_s}%:" to player
+        send colored "&7Приписка: &f%getSkinNote({_c}, {_s})%" to player
+        send "&7Погоня: &f%{skin.chase.sound.%{_c}%.%{_s}%}% (%{skin.chase.dur.%{_c}%.%{_s}%}% сек)" to player
+        send "&7Одиночный ЛМС: &f%{skin.lmsSolo.%{_c}%.%{_s}%}%" to player
+        send "&7Тема: &f%{skin.theme.%{_c}%.%{_s}%}%" to player
+        loop {lms.pair::*}:
+            if loop-index contains "%{_c}%~%{_s}%":
+                send "&7Парный: &f%loop-index% &7-> &f%loop-value%" to player
+
+# =========================================================
+# GUI — общий движок для /skinshop (покупка) и /skins (выбор).
+# Хранение состояния меню на игрока:
+#   {skinmenu.inv.%p%}   — открытый инвентарь (для сверки в on inventory click)
+#   {skinmenu.mode.%p%}  — "shop" или "select"
+#   {skinmenu.stage.%p%} — "charselect" или "list"
+#   {skinmenu.char.%p%}  — charid, когда мы внутри списка скинов персонажа
+#   {skinmenu.slotSkin.%p%::slot} / {skinmenu.slotType.%p%::slot} — что лежит в слоте списка
+# =========================================================
+
+function openSkinCharSelect(p: player, mode: text):
+    set {_inv} to a new chest inventory with 3 rows named "&6Скины — выбери персонажа"
+    set slot 0 of {_inv} to getCharIcon("denden") named "&cДэнДэн"
+    set slot 1 of {_inv} to getCharIcon("necromancer") named "&5Некромансик"
+    set slot 2 of {_inv} to getCharIcon("anomaly") named "&cАномалия"
+    set slot 3 of {_inv} to getCharIcon("project") named "&8The Project"
+    set slot 4 of {_inv} to getCharIcon("blind") named "&2Незрячий"
+    set slot 9 of {_inv} to getCharIcon("andrey") named "&aАндрей"
+    set slot 10 of {_inv} to getCharIcon("hacker") named "&bРататуй"
+    set slot 11 of {_inv} to getCharIcon("kirill") named "&aКирилл"
+    set slot 12 of {_inv} to getCharIcon("mihuilong") named "&9Михуилонг"
+    set slot 13 of {_inv} to getCharIcon("ilya") named "&fИлья"
+    set slot 14 of {_inv} to getCharIcon("mayor") named "&7Маёр"
+    set slot 15 of {_inv} to getCharIcon("dartikil") named "&6Dartikil"
+    set slot 16 of {_inv} to getCharIcon("alexey") named "&dМякШмяка"
+    set slot 17 of {_inv} to getCharIcon("thomas") named "&bТомас"
+    set slot 18 of {_inv} to getCharIcon("sanya") named "&2Саня"
+    set {skinmenu.inv.%{_p}%} to {_inv}
+    set {skinmenu.mode.%{_p}%} to {_mode}
+    set {skinmenu.stage.%{_p}%} to "charselect"
+    open {_inv} to {_p}
+
+function charidForSlot(slot: number) :: text:
+    if {_slot} is 0:
+        return "denden"
+    else if {_slot} is 1:
+        return "necromancer"
+    else if {_slot} is 2:
+        return "anomaly"
+    else if {_slot} is 3:
+        return "project"
+    else if {_slot} is 4:
+        return "blind"
+    else if {_slot} is 9:
+        return "andrey"
+    else if {_slot} is 10:
+        return "hacker"
+    else if {_slot} is 11:
+        return "kirill"
+    else if {_slot} is 12:
+        return "mihuilong"
+    else if {_slot} is 13:
+        return "ilya"
+    else if {_slot} is 14:
+        return "mayor"
+    else if {_slot} is 15:
+        return "dartikil"
+    else if {_slot} is 16:
+        return "alexey"
+    else if {_slot} is 17:
+        return "thomas"
+    else if {_slot} is 18:
+        return "sanya"
+    return ""
+
+# Кладёт голову в слот: с припиской — в описании (lore), без — просто имя.
+function putSkinItem(inv: inventory, slot: number, name: text, note: text):
+    if {_note} is "":
+        set slot {_slot} of {_inv} to player head named {_name}
+    else:
+        set {_lore} to colored "&7%{_note}%"
+        set slot {_slot} of {_inv} to player head named {_name} with lore {_lore}
+
+function buildSkinListMenu(p: player, charid: text, mode: text):
+    delete {skinmenu.slotSkin.%{_p}%::*}
+    delete {skinmenu.slotType.%{_p}%::*}
+    set {_inv} to a new chest inventory with 3 rows named "&6Скины: %getCharDisplayName({_charid})%"
+    set {_cur} to getSelectedSkin({_p}, {_charid})
+
+    # --- слот 0: классический, всегда открыт, бесплатный ---
+    set {_name} to "&aКлассический"
+    if {_cur} is {_charid}:
+        set {_name} to "&a&l✔ Классический"
+    putSkinItem({_inv}, 0, {_name}, getSkinNote({_charid}, {_charid}))
+    set {skinmenu.slotSkin.%{_p}%::0} to {_charid}
+    set {skinmenu.slotType.%{_p}%::0} to "classic"
+
+    # --- слоты 1-4: милстоун-скины (только в /skins — в магазине не продаются и не показываются) ---
+    if {_mode} is "select":
+        loop 4 times:
+            set {_slot} to loop-number
+            set {_level} to 25 * loop-number
+            set {_skinid} to milestoneSkinId({_charid}, {_level})
+            if isSkinUnlocked({_p}, {_charid}, {_skinid}) is true:
+                if {_cur} is {_skinid}:
+                    set {_name} to "&a&l✔ %{_skinid}% (ур. %{_level}%)"
+                else:
+                    set {_name} to "&a%{_skinid}% (ур. %{_level}%, открыт)"
+            else:
+                set {_name} to "&8%{_skinid}% (заблокирован, нужен %{_level}% ур.)"
+            putSkinItem({_inv}, {_slot}, {_name}, getSkinNote({_charid}, {_skinid}))
+            set {skinmenu.slotSkin.%{_p}%::%{_slot}%} to {_skinid}
+            set {skinmenu.slotType.%{_p}%::%{_slot}%} to "milestone"
+
+    # --- слоты с 9: магазинные скины ---
+    set {_i} to 0
+    loop {shop.skinlist.%{_charid}%::*}:
+        set {_slot} to 9 + {_i}
+        if {_slot} <= 26:
+            set {_skinid} to loop-value
+            set {_price} to {shop.skin.%{_charid}%.%loop-value%.price}
+            if isSkinUnlocked({_p}, {_charid}, {_skinid}) is true:
+                if {_cur} is {_skinid}:
+                    set {_name} to "&a&l✔ %{_skinid}%"
+                else:
+                    set {_name} to "&a%{_skinid}% (куплен)"
+            else:
+                if getMoney({_p}) >= {_price}:
+                    set {_name} to "&e%{_skinid}% &7— &6%{_price}%"
+                else:
+                    set {_name} to "&c%{_skinid}% &7— &6%{_price}% &c(не хватает денег)"
+            putSkinItem({_inv}, {_slot}, {_name}, getSkinNote({_charid}, {_skinid}))
+            set {skinmenu.slotSkin.%{_p}%::%{_slot}%} to {_skinid}
+            set {skinmenu.slotType.%{_p}%::%{_slot}%} to "shop"
+        add 1 to {_i}
+
+    set {skinmenu.inv.%{_p}%} to {_inv}
+    set {skinmenu.mode.%{_p}%} to {_mode}
+    set {skinmenu.stage.%{_p}%} to "list"
+    set {skinmenu.char.%{_p}%} to {_charid}
+    open {_inv} to {_p}
+
+command /skinshop:
+    trigger:
+        openSkinCharSelect(player, "shop")
+
+command /skins:
+    trigger:
+        openSkinCharSelect(player, "select")
+
+on inventory click:
+    if {skinmenu.inv.%player%} is set:
+        if event-inventory is {skinmenu.inv.%player%}:
+            cancel event
+            # ВАЖНО: "clicked slot" — это объект Slot (содержимое слота),
+            # а НЕ число. Прямое сравнение "clicked slot is 3" работает
+            # (у Skript есть компаратор Slot↔Number для равенства), но
+            # передать его как есть в функцию с параметром "number"
+            # (charidForSlot) — нет: конвертация не срабатывает, charid
+            # всегда получался пустым, и весь клик обрывался на "stop".
+            # "index of clicked slot" явно даёт числовой индекс слота.
+            set {_slot} to index of clicked slot
+            set {_p} to player
+
+            if {skinmenu.stage.%{_p}%} is "charselect":
+                set {_charid} to charidForSlot({_slot})
+                if {_charid} is "":
+                    stop
+                set {_mode} to {skinmenu.mode.%{_p}%}
+                # closeInventory() синхронно внутри inventory click event
+                # на части сборок тихо обрывает выполнение — поэтому не
+                # закрываем явно, а просто ждём тик и открываем новое меню
+                # поверх старого (Bukkit сам его заменяет).
+                wait 1 tick
+                buildSkinListMenu({_p}, {_charid}, {_mode})
+                stop
+
+            if {skinmenu.stage.%{_p}%} is "list":
+                if {skinmenu.slotSkin.%{_p}%::%{_slot}%} is not set:
+                    stop
+                set {_charid} to {skinmenu.char.%{_p}%}
+                set {_skinid} to {skinmenu.slotSkin.%{_p}%::%{_slot}%}
+                set {_type} to {skinmenu.slotType.%{_p}%::%{_slot}%}
+                set {_mode} to {skinmenu.mode.%{_p}%}
+
+                if {_mode} is "shop":
+                    if {_type} is "classic" or "milestone":
+                        send "&7Этот скин не продаётся в магазине." to {_p}
+                        stop
+                    if isSkinUnlocked({_p}, {_charid}, {_skinid}) is true:
+                        send "&7Уже куплено — выбери его через /skins." to {_p}
+                        stop
+                    set {_price} to {shop.skin.%{_charid}%.%{_skinid}%.price}
+                    if getMoney({_p}) < {_price}:
+                        send "&cНе хватает денег: нужно %{_price}%, у тебя %getMoney({_p})%." to {_p}
+                        stop
+                    set {_cost} to 0 - {_price}
+                    addMoney({_p}, {_cost})
+                    unlockSkin({_p}, {_charid}, {_skinid})
+                    selectSkin({_p}, {_charid}, {_skinid})
+                    send "&aКуплено и выбрано: %{_skinid}%! Остаток: %getMoney({_p})%." to {_p}
+                    sendSkinNote({_p}, {_charid}, {_skinid})
+                    wait 1 tick
+                    buildSkinListMenu({_p}, {_charid}, "shop")
+                    stop
+
+                if {_mode} is "select":
+                    if isSkinUnlocked({_p}, {_charid}, {_skinid}) is false:
+                        if {_type} is "milestone":
+                            send "&cЭтот скин открывается уровнем персонажа — качай XP." to {_p}
+                        else:
+                            send "&cЭтот скин ещё не куплен — загляни в /skinshop." to {_p}
+                        stop
+                    selectSkin({_p}, {_charid}, {_skinid})
+                    send "&aВыбран скин '%{_skinid}%' для %getCharDisplayName({_charid})%." to {_p}
+                    sendSkinNote({_p}, {_charid}, {_skinid})
+                    wait 1 tick
+                    buildSkinListMenu({_p}, {_charid}, "select")
+                    stop
+
+on inventory close:
+    if {skinmenu.inv.%player%} is set:
+        if event-inventory is {skinmenu.inv.%player%}:
+            delete {skinmenu.inv.%player%}
+            delete {skinmenu.mode.%player%}
+            delete {skinmenu.stage.%player%}
+            delete {skinmenu.char.%player%}
+            delete {skinmenu.slotSkin.%player%::*}
+            delete {skinmenu.slotType.%player%::*}

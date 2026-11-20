@@ -1,0 +1,827 @@
+# =========================================================
+# round.sk — старт/конец раунда, объявление убийцы, условия победы,
+# отслеживание живых выживших, финальная дуэль (ЛМС)
+# =========================================================
+
+# --- Время убийце (режим "Время"), всё меняется здесь:
+#     baseTime — стартовое время раунда, сек;
+#     perSurvivorTime — плюс столько сек за каждого выжившего на старте;
+#     killerTimeBonus — сколько сек добавляется за убийство выжившего
+#     и за выход выжившего из игры. ---
+options:
+    baseTime: 70
+    perSurvivorTime: 50
+    killerTimeBonus: 40
+
+# Список персонажей-убийц. Аномалия — будущий убийца, персонажа/способностей
+# пока нет нигде кроме этой строки и трека ЛМС you_slow, но так не забудется
+# дописать сюда, когда дойдут руки его реализовать.
+function isManiac(charid: text) :: boolean:
+    if {_charid} is "denden":
+        return true
+    else if {_charid} is "necromancer":
+        return true
+    else if {_charid} is "anomaly":
+        return true
+    else if {_charid} is "project":
+        return true
+    else if {_charid} is "blind":
+        return true
+    else:
+        return false
+
+# --- Режим "Время": общий таймер раунда, показан всем боссбаром вместо
+#     старой системы "почини N генераторов". Формула на старте: 70 сек +
+#     50 сек за каждого живого на тот момент выжившего. Дальше меняется
+#     событиями: починка гена -10 сек, убийство выжившего +40 сек.
+#     Выжившие побеждают, когда таймер доходит до 0, а хоть кто-то жив.
+#     Если все мертвы раньше — обычная победа убийцы, таймер тут ни при чём. ---
+function updateRoundBossBar():
+    if {round.timeLeft} < 0:
+        set {round.timeLeft} to 0
+    set {_minutes} to floor({round.timeLeft} / 60)
+    set {_secs} to floor({round.timeLeft}) - ({_minutes} * 60)
+    set {_seconds} to "%{_secs}%"
+    if {_secs} < 10:
+        set {_seconds} to "0%{_secs}%"
+    set {_progress} to {round.timeLeft} / {round.timeMax}
+    if {_progress} > 1:
+        set {_progress} to 1
+    set {_value} to floor({_progress} * 1000)
+    # Ванильный /bossbar (1.19.4), аддоны не нужны
+    if {round.barCreated} is not true:
+        execute console command "bossbar remove round:timer"
+        execute console command "bossbar add round:timer ""Таймер"""
+        execute console command "bossbar set round:timer max 1000"
+        execute console command "bossbar set round:timer color yellow"
+        execute console command "bossbar set round:timer style progress"
+        set {round.barCreated} to true
+    execute console command "bossbar set round:timer players @a"
+    execute console command "bossbar set round:timer name {""text"":""⏱ %{_minutes}%:%{_seconds}%"",""color"":""yellow""}"
+    execute console command "bossbar set round:timer value %{_value}%"
+
+every 1 second:
+    if {round.active} is true:
+        if {round.duelActive} is not true:
+            if {round.timeLeft} is set:
+                remove 1 from {round.timeLeft}
+                updateRoundBossBar()
+            if {round.timeLeft} <= 0:
+                if {round.survivorsAlive} > 0:
+                    loop all players:
+                        if isManiac({char.%loop-player%}) is false:
+                            if {alive.%loop-player%} is true:
+                                addAnger(loop-player, 2)
+                                awardXP(loop-player, {char.%loop-player%}, 60)
+                    addStatWin("survivor")
+                    stopRound("&a&lВЫЖИВШИЕ ПОБЕДИЛИ! Время истекло.")
+
+# --- Bloodlust: сброс таймера погони + снятие текущего ускорения от него.
+#     Вызывается при успешном ударе М1 и при полной потере погони. ---
+function resetBloodlust(p: player):
+    if {bloodlust.timer.%{_p}%} is set:
+        if {bloodlust.timer.%{_p}%} > 0:
+            set {bloodlust.timer.%{_p}%} to 0
+
+# --- Музыка меню/лобби: играет всем на сервере, пока раунд не идёт ---
+every 1 second:
+    if {round.active} is false:
+        if {menu.music.sound} is set:
+            if {menu.music.nextPlay} is not set:
+                set {menu.music.nextPlay} to 0
+            if {menu.music.nextPlay} <= 0:
+                loop all players:
+                    execute console command "/playsound %{menu.music.sound}% music %loop-player%"
+                set {menu.music.nextPlay} to {menu.music.duration}
+            else:
+                remove 1 from {menu.music.nextPlay}
+
+# --- Эмбиент карты: если для {round.map} задан звук (/setambient), проигрываем его
+#     всем, и повторяем ровно через {duration} секунд — пока раунд идёт на этой карте.
+#     Обрывается в stopRound() при завершении раунда. ---
+every 1 second:
+    if {round.active} is true:
+        if {map.%{round.map}%.ambient.sound} is set:
+            if {ambient.nextPlay} is not set:
+                set {ambient.nextPlay} to 0
+            if {ambient.nextPlay} <= 0:
+                loop all players:
+                    execute console command "/playsound %{map.%{round.map}%.ambient.sound}% ambient %loop-player%"
+                set {ambient.nextPlay} to {map.%{round.map}%.ambient.duration}
+            else:
+                remove 1 from {ambient.nextPlay}
+
+# --- Bloodlust: не завязан на настроенную музыку погони — работает всегда.
+#     Пока хоть один живой выживший в 15 блоках от убийцы — таймер растёт.
+#     15 сек непрерывной погони -> Speed I, 30 сек -> Speed II, 45 сек -> Speed III.
+#     Сбрасывается полностью, если все выжившие вышли за 15 блоков (см. resetBloodlust),
+#     либо мгновенно при успешном ударе М1 (см. abilities.sk). ---
+every 1 second:
+    if {round.active} is true:
+        if {round.maniac} is set:
+            set {_inChase} to false
+            loop all players:
+                if isManiac({char.%loop-player%}) is false:
+                    if {alive.%loop-player%} is true:
+                        if distance between loop-player and {round.maniac} <= 15:
+                            set {_inChase} to true
+            if {_inChase} is true:
+                if {bloodlust.timer.%{round.maniac}%} is not set:
+                    set {bloodlust.timer.%{round.maniac}%} to 0
+                add 1 to {bloodlust.timer.%{round.maniac}%}
+                if {bloodlust.timer.%{round.maniac}%} is 15:
+                    send "&6&lBloodlust I" to {round.maniac}
+                else if {bloodlust.timer.%{round.maniac}%} is 30:
+                    send "&6&lBloodlust II" to {round.maniac}
+                else if {bloodlust.timer.%{round.maniac}%} is 45:
+                    send "&6&lBloodlust III" to {round.maniac}
+            else:
+                resetBloodlust({round.maniac})
+
+# --- СКОРОСТЬ УБИЙЦЫ (единственное место, где на убийцу ставится speed).
+#     Уровень считает maniacSpeedTier() в abilities.sk: вне погони Speed I,
+#     в погоне — только Bloodlust, плюс Сталк/временные бусты способностей.
+#     Эффект на 3 сек и обновляется каждую секунду — застрять "навсегда" он не может.
+#     dbgLive(): в тестовом режиме с манекенами скорость тоже работает без раунда. ---
+every 1 second:
+    if dbgLive() is true:
+        loop all players:
+            if isManiac({char.%loop-player%}) is true:
+                set {_go} to false
+                if {round.active} is not true:
+                    set {_go} to true
+                else if {round.live} is true:
+                    set {_go} to true
+                if {_go} is true:
+                    set {_tier} to maniacSpeedTier(loop-player)
+                    remove speed from loop-player
+                    if {_tier} > 0:
+                        apply a potion effect of speed of tier {_tier} to loop-player for 3 seconds
+
+# --- Музыка погони: свой трек на каждого убийцу, дистанция без учёта видимости.
+#     Гистерезис 15/20 блоков — старт на 15, гаснет только дальше 20, чтобы не
+#     мигало туда-сюда на границе. Зацикливается через playMapAmbient-подобный
+#     повтор по {chase.duration.%charid%}, отдельно на каждого выжившего. ---
+every 1 second:
+    if {round.active} is true:
+        if {round.maniac} is set:
+            set {_killerChar} to {char.%{round.maniac}%}
+            # трек погони: у скина убийцы может быть свой (getChaseSound в skins.sk)
+            set {_chaseSound} to getChaseSound({round.maniac}, {_killerChar})
+            if {_chaseSound} is not "":
+                set {chase.activeSound} to {_chaseSound}
+                set {_chaseDur} to getChaseDuration({round.maniac}, {_killerChar})
+                loop all players:
+                    set {_s} to loop-player
+                    if isManiac({char.%{_s}%}) is false:
+                        if {alive.%{_s}%} is true:
+                            set {_dist} to distance between {_s} and {round.maniac}
+                            if {chase.active.%{_s}%} is not true:
+                                if {_dist} <= 15:
+                                    set {chase.active.%{_s}%} to true
+                                    set {chase.nextLoop.%{_s}%} to 0
+                            if {chase.active.%{_s}%} is true:
+                                if {_dist} > 20:
+                                    delete {chase.active.%{_s}%}
+                                    delete {chase.nextLoop.%{_s}%}
+                                    execute console command "/stopsound %{_s}% * %{_chaseSound}%"
+                                else:
+                                    if {chase.nextLoop.%{_s}%} is not set:
+                                        set {chase.nextLoop.%{_s}%} to 0
+                                    if {chase.nextLoop.%{_s}%} <= 0:
+                                        execute console command "/playsound %{_chaseSound}% music %{_s}%"
+                                        set {chase.nextLoop.%{_s}%} to {_chaseDur}
+                                    else:
+                                        remove 1 from {chase.nextLoop.%{_s}%}
+
+# --- Предметы на карте: максимум 1 аптечка + 2 скорости за раунд, из точек
+#     /setitemspawn. Если точек нет — просто ничего не спавнится, это не критично.
+#     Убийца подобрать их не может (см. abilities.sk). ---
+function spawnMapItems(mapid: text):
+    delete {mapItemEntities::*}
+    if size of {map.%{_mapid}%.item.spawns::*} > 0:
+        set {_i} to a random integer between 1 and size of {map.%{_mapid}%.item.spawns::*}
+        drop 1 of golden apple named "&aАптечка (предмет)" at {map.%{_mapid}%.item.spawns::%{_i}%}
+        add last spawned entity to {mapItemEntities::*}
+        loop 2 times:
+            set {_i2} to a random integer between 1 and size of {map.%{_mapid}%.item.spawns::*}
+            drop 1 of potion named "&bСкорость (предмет)" at {map.%{_mapid}%.item.spawns::%{_i2}%}
+            add last spawned entity to {mapItemEntities::*}
+
+# =========================================================
+# Случайная карта без повторов
+# ---------------------------------------------------------
+#  {maps.played::*} — карты, сыгранные в текущем цикле.
+#  {maps.last}      — карта последнего раунда.
+#  Рандом выбирает только среди ещё не сыгранных карт. Когда сыграны
+#  все — цикл начинается заново, а карта, которой закончился прошлый
+#  цикл, в первом выборе нового цикла исключается (чтобы не было подряд).
+#  Обычный /startround <карта> тоже засчитывает карту как сыгранную.
+# =========================================================
+function pickRandomMap() :: text:
+    if size of {maps::*} is 0:
+        return ""
+    delete {_avail::*}
+    loop {maps::*}:
+        if {maps.played::*} does not contain loop-value:
+            add loop-value to {_avail::*}
+    if size of {_avail::*} is 0:
+        delete {maps.played::*}
+        loop {maps::*}:
+            if size of {maps::*} is 1:
+                add loop-value to {_avail::*}
+            else if loop-value is not {maps.last}:
+                add loop-value to {_avail::*}
+    set {_i} to a random integer between 1 and size of {_avail::*}
+    return {_avail::%{_i}%}
+
+function markMapPlayed(m: text):
+    if {maps.played::*} does not contain {_m}:
+        add {_m} to {maps.played::*}
+    set {maps.last} to {_m}
+
+command /startround <text>:
+    permission: op
+    trigger:
+        set {_map} to arg-1
+
+        # --- /startround random — берём случайную карту из списка ---
+        if {_map} is "random":
+            if size of {maps::*} is 0:
+                broadcast "&cНет зарегистрированных карт (/addmap)."
+                stop
+            set {_map} to pickRandomMap()
+            broadcast "&eВыбрана случайная карта: %{_map}%"
+
+        if {map.%{_map}%.maniac.spawn} is not set:
+            broadcast "&cДля карты '%{_map}%' не установлена точка маньяка. Используй /setmaniacspawn %{_map}%"
+            stop
+        if size of {map.%{_map}%.survivor.spawns::*} is 0:
+            broadcast "&cДля карты '%{_map}%' нет точек выживших. Используй /setsurvivorspawn %{_map}%"
+            stop
+
+        # --- Определяем убийцу: у кого больше всего злости среди тех, кто хоть что-то выбрал ---
+        delete {_killer}
+        set {_maxAnger} to -1
+        loop all players:
+            set {_p} to loop-player
+            set {_hasPref} to false
+            if {char.maniacPref.%{_p}%} is set:
+                set {_hasPref} to true
+            else if {char.survivorPref.%{_p}%} is set:
+                set {_hasPref} to true
+            if {_hasPref} is true:
+                set {_a} to 0
+                if {anger.%{_p}%} is set:
+                    set {_a} to {anger.%{_p}%}
+                if {_a} > {_maxAnger}:
+                    set {_maxAnger} to {_a}
+                    set {_killer} to {_p}
+                else if {_a} = {_maxAnger}:
+                    if a random integer between 1 and 2 is 1:
+                        set {_killer} to {_p}
+
+        if {_killer} is not set:
+            broadcast "&cНикто не выбрал роль — сначала /choosemaniac или /choosesurvivor."
+            stop
+
+        # --- Назначаем персонажей ---
+        set {round.active} to true
+        delete {round.live}
+        delete {cdr::*}
+        set {round.map} to {_map}
+        markMapPlayed({_map})
+        set {round.survivorsAlive} to 0
+        if {round.id} is not set:
+            set {round.id} to 0
+        add 1 to {round.id}
+        set {_myId} to {round.id}
+        delete {ambient.nextPlay}
+        loop all players:
+            delete {chase.active.%loop-player%}
+            delete {chase.nextLoop.%loop-player%}
+            delete {bloodlust.timer.%loop-player%}
+            delete {stunShield.%loop-player%}
+            delete {staggered.%loop-player%}
+            delete {project.dashStack.%loop-player%}
+            delete {project.channeling.%loop-player%}
+            delete {project.stunImmune.%loop-player%}
+            if {menu.music.sound} is set:
+                execute console command "/stopsound %loop-player% * %{menu.music.sound}%"
+            execute console command "/team join hide_names %loop-player%"
+        execute console command "/gamerule naturalRegeneration false"
+        resetAllGenerators()
+        spawnMapItems({_map})
+
+        set {_killerChar} to "denden"
+        if {char.maniacPref.%{_killer}%} is set:
+            set {_killerChar} to {char.maniacPref.%{_killer}%}
+        set {char.%{_killer}%} to {_killerChar}
+        set {anger.%{_killer}%} to 0
+
+        loop all players:
+            set {_p} to loop-player
+            if {_p} is not {_killer}:
+                set {_hasPref2} to false
+                if {char.maniacPref.%{_p}%} is set:
+                    set {_hasPref2} to true
+                else if {char.survivorPref.%{_p}%} is set:
+                    set {_hasPref2} to true
+                if {_hasPref2} is true:
+                    set {_sChar} to "andrey"
+                    if {char.survivorPref.%{_p}%} is set:
+                        set {_sChar} to {char.survivorPref.%{_p}%}
+                    set {char.%{_p}%} to {_sChar}
+
+        # --- Выдаём наборы всем сразу, до реванш-экрана. Лобби-предметы (компас/
+        #     звезда/книга/порох/изумруд) убираем у ВСЕХ безусловно — включая
+        #     зрителей без роли, которым give_X_kit ниже не вызовется и предмет
+        #     иначе провисел бы в инвентаре весь раунд. ---
+        loop all players:
+            set {_p} to loop-player
+            clear inventory of {_p}
+            if {char.%{_p}%} is "denden":
+                give_denden_kit({_p})
+            else if {char.%{_p}%} is "necromancer":
+                give_necromancer_kit({_p})
+            else if {char.%{_p}%} is "anomaly":
+                give_anomaly_kit({_p})
+            else if {char.%{_p}%} is "andrey":
+                give_andrey_kit({_p})
+            else if {char.%{_p}%} is "mihuilong":
+                give_mihuilong_kit({_p})
+            else if {char.%{_p}%} is "alexey":
+                give_alexey_kit({_p})
+            else if {char.%{_p}%} is "ilya":
+                give_ilya_kit({_p})
+            else if {char.%{_p}%} is "hacker":
+                give_hacker_kit({_p})
+            else if {char.%{_p}%} is "thomas":
+                give_thomas_kit({_p})
+            else if {char.%{_p}%} is "mayor":
+                give_mayor_kit({_p})
+            else if {char.%{_p}%} is "sanya":
+                give_sanya_kit({_p})
+            else if {char.%{_p}%} is "kirill":
+                give_kirill_kit({_p})
+            else if {char.%{_p}%} is "dartikil":
+                give_dartikil_kit({_p})
+            else if {char.%{_p}%} is "project":
+                give_project_kit({_p})
+            else if {char.%{_p}%} is "blind":
+                give_blind_kit({_p})
+            applyCharacterSkin({_p}, {char.%{_p}%})
+
+        # --- Реванш-экран: показываем убийцу и карту заранее, даём время подготовиться ---
+        broadcast "&4&l☠ Убийца этого раунда: &f%{_killer}%"
+        broadcast "&e&lКарта: &f%{_map}%"
+        broadcast "&7Приготовьтесь..."
+        if {debug.mode} is true:
+            wait 2 seconds
+        else:
+            wait 10 seconds
+
+        # --- Раунд могли завершить, пока шла подготовка (например, убийца вышел) ---
+        if {round.active} is not true:
+            stop
+        if {round.id} is not {_myId}:
+            stop
+
+        # --- Телепорт по ролям ---
+        set {_maniacFound} to false
+        loop all players:
+            set {_p} to loop-player
+            if isManiac({char.%{_p}%}) is true:
+                teleport {_p} to {map.%{_map}%.maniac.spawn}
+                set {_maniacFound} to true
+                set {round.maniacName} to "%{_p}%"
+                set {round.maniac} to {_p}
+                # Вечное ночное зрение всем убийцам (снимается в stopRound через clear the active and hidden potion effects)
+                apply an ambient potion effect of night vision to {_p} for 999999 seconds
+                if {char.%{_p}%} is "denden":
+                    apply jump boost 2 to {_p} for 999999 seconds
+                else if {char.%{_p}%} is "project":
+                    # --- Пассивка 2: перманентное замедление, снимается только clear all potion effects в stopRound() ---
+                    apply slowness 1 to {_p} for 999999 seconds
+            else if {char.%{_p}%} is set:
+                set {_i} to a random integer between 1 and size of {map.%{_map}%.survivor.spawns::*}
+                teleport {_p} to {map.%{_map}%.survivor.spawns::%{_i}%}
+                add 1 to {round.survivorsAlive}
+                set {alive.%{_p}%} to true
+                # --- Злость + XP за старт раунда выжившим ---
+                addAnger({_p}, 1)
+                awardXP({_p}, {char.%{_p}%}, 30)
+
+        if {_maniacFound} is false:
+            broadcast "&cОшибка: убийца не назначен."
+            set {round.active} to false
+            stop
+
+        loop 5 times:
+            if {round.active} is not true:
+                stop
+            if {round.id} is not {_myId}:
+                stop
+            broadcast "&eНачало через &c%6 - loop-number% &eсек."
+            wait 1 second
+        # --- Раунд могли завершить, пока шла подготовка (например, убийца вышел) ---
+        if {round.active} is not true:
+            stop
+        if {round.id} is not {_myId}:
+            stop
+
+        # --- Страховка от читов с меткой Рататуя: всё, что поставили до старта, сбрасываем ---
+        loop all players:
+            delete {hacker.mark.%loop-player%}
+        set {round.live} to true
+        broadcast "&4&lРАУНД НАЧАЛСЯ &7на карте &f%{_map}%"
+
+        # --- Режим "Время": таймер вместо фиксированного числа генераторов.
+        #     Формула фиксируется один раз на старте и дальше только меняется
+        #     событиями (гены -10 сек, убийства +40 сек) — не пересчитывается
+        #     с нуля. ---
+        set {round.timeMax} to {@baseTime} + ({round.survivorsAlive} * {@perSurvivorTime})
+        set {round.timeLeft} to {round.timeMax}
+        updateRoundBossBar()
+
+        loop all players:
+            set gamemode of loop-player to adventure
+
+        # --- Авто-ЛМС: если на сервере всего 2 человека, сразу финальная дуэль ---
+        if size of all players is 2:
+            if {round.survivorsAlive} is 1:
+                startFinalDuel()
+
+command /endround:
+    permission: op
+    trigger:
+        stopRound("&aРаунд остановлен вручную.")
+
+# --- Команда переключения авто-раундов ---
+command /autoround:
+    permission: op
+    trigger:
+        if {autoround.enabled} is true:
+            set {autoround.enabled} to false
+            send "&cАвто-старт раундов выключен." to player
+        else:
+            set {autoround.enabled} to true
+            send "&aАвто-старт раундов включён." to player
+
+# --- Смерть выжившего ---
+on death of a player:
+    if {round.active} is true:
+        set {_p} to victim
+        if {char.%{_p}%} is "sanya":
+            destroySanyaStructures({_p})
+        if isManiac({char.%{_p}%}) is false:
+            set {_canRevive} to false
+            if {char.%{_p}%} is "ilya":
+                if {ilya.reviveUsed.%{_p}%} is not true:
+                    if {ilya_charged.%{_p}%} is true:
+                        # Шкала заряжена (3 полных стана) — возрождение с ослабленным хп.
+                        # Примечание: 1 "сердце" в этом коде = 2 HP (как в ванильном МК).
+                        # В ЛМС бесплатного возрождения больше нет — см. startFinalDuel():
+                        # там же {ilya.reviveUsed} принудительно ставится в true для Ильи,
+                        # так что этот блок в ЛМС уже недостижим.
+                        set {_canRevive} to true
+
+            if {_canRevive} is true:
+                set {ilya_revivePending.%{_p}%} to true
+            else:
+                set {alive.%{_p}%} to false
+                remove 1 from {round.survivorsAlive}
+                # --- Режим "Время": убийство выжившего даёт убийце +40 сек на охоту
+                #     за остальными (зеркально тому, что гены срезают -10 сек) ---
+                if {round.timeLeft} is set:
+                    add {@killerTimeBonus} to {round.timeLeft}
+                    updateRoundBossBar()
+                # --- XP убийце за убийство выжившего (злость убийце не начисляется) ---
+                if {round.maniac} is set:
+                    awardXP({round.maniac}, {char.%{round.maniac}%}, 50)
+                if {round.survivorsAlive} <= 0:
+                    # --- XP убийце за победу в раунде, до очистки {char.*} внутри stopRound() ---
+                    if {round.maniac} is set:
+                        awardXP({round.maniac}, {char.%{round.maniac}%}, 100)
+                    addStatWin("maniac")
+                    stopRound("&4&lМАНЬЯК ПОБЕДИЛ! Все выжившие мертвы.")
+                else if {round.survivorsAlive} = 1:
+                    startFinalDuel()
+
+# --- После смерти игрок уходит в спектатор и в лобби ---
+on respawn:
+    if {round.active} is true:
+        if {char.%player%} is set:
+            if {ilya_revivePending.%player%} is true:
+                if {armorHidden.%player%} is true:
+                    delete {armorHidden.%player%}
+                    set helmet of player to {savedArmor.helmet.%player%}
+                    set chestplate of player to {savedArmor.chest.%player%}
+                    set leggings of player to {savedArmor.legs.%player%}
+                    set boots of player to {savedArmor.boots.%player%}
+                    delete {savedArmor.helmet.%player%}
+                    delete {savedArmor.chest.%player%}
+                    delete {savedArmor.legs.%player%}
+                    delete {savedArmor.boots.%player%}
+                delete {ilya_revivePending.%player%}
+                wait 1 tick
+                set {_mark} to {ilya.mark.%player%}
+                if {_mark} is not set:
+                    if size of {map.%{round.map}%.survivor.spawns::*} > 0:
+                        set {_mark} to {map.%{round.map}%.survivor.spawns::1}
+                if {_mark} is set:
+                    teleport player to {_mark}
+                set gamemode of player to adventure
+                set health of player to 6
+                broadcast "&5&lИлья возродился на метке, но сильно ослаблен!"
+                addAnger(player, 1)
+                awardXP(player, "ilya", 30)
+                apply glowing to player for 15 seconds
+                set {ilya_charged.%player%} to false
+                set {ilya_stunCount.%player%} to 0
+                set {ilya.reviveUsed.%player%} to true
+            else if isManiac({char.%player%}) is false:
+                if {alive.%player%} is false:
+                    delete {armorHidden.%player%}
+                    delete {savedArmor.helmet.%player%}
+                    delete {savedArmor.chest.%player%}
+                    delete {savedArmor.legs.%player%}
+                    delete {savedArmor.boots.%player%}
+                    if {chase.active.%player%} is true:
+                        delete {chase.active.%player%}
+                        delete {chase.nextLoop.%player%}
+                        stopChaseMusic(player)
+                    wait 1 tick
+                    set max health of player to 10
+                    set gamemode of player to spectator
+                    if {lobby.spawn} is set:
+                        teleport player to {lobby.spawn}
+
+# --- Финальная дуэль: последний выживший против маньяка ---
+function startFinalDuel():
+    delete {_killer}
+    delete {_last}
+    set {_myRoundId} to {round.id}
+    loop all players:
+        set {_p} to loop-player
+        if isManiac({char.%{_p}%}) is true:
+            set {_killer} to {_p}
+        else if {char.%{_p}%} is set:
+            if {alive.%{_p}%} is true:
+                set {_last} to {_p}
+    if {_killer} is set:
+        if {_last} is set:
+            broadcast "&4&l— ФИНАЛЬНАЯ ДУЭЛЬ —"
+            apply glowing to {_killer} for 12 seconds
+            apply glowing to {_last} for 12 seconds
+
+            set {_maniacChar} to {char.%{_killer}%}
+            set {_survivorChar} to {char.%{_last}%}
+
+            if {_survivorChar} is "ilya":
+                if {ilya.reviveUsed.%{_last}%} is not true:
+                    set {_ilyaCharges} to {ilya_stunCount.%{_last}%}
+                    if {_ilyaCharges} > 0:
+                        # В ЛМС бесплатного возрождения у Ильи больше нет — вместо этого
+                        # накопленные заряды станов сразу конвертируются в хп.
+                        # 1 заряд = +2 "сердца" к максимальному хп и +2 сердца
+                        # немедленного лечения (поверх текущего здоровья, не максимума).
+                        # Здесь и далее в коде число, переданное в "max health"/"health",
+                        # соответствует "сердцам" — 1 сердце = 2 HP как в ванильном Minecraft.
+                        set {_ilyaBonus} to {_ilyaCharges} * 2
+                        set {_newMax} to (max health of {_last}) + {_ilyaBonus}
+                        set max health of {_last} to {_newMax}
+                        wait 1 tick
+                        set health of {_last} to (health of {_last}) + {_ilyaBonus}
+                        send "&5Заряды станов конвертированы: +%{_ilyaBonus}% сердец к макс. хп и +%{_ilyaBonus}% сердец здоровья!" to {_last}
+                    # Заряды потрачены — в ЛМС Илья больше не сможет возродиться.
+                    set {ilya_stunCount.%{_last}%} to 0
+                    set {ilya_charged.%{_last}%} to false
+                    set {ilya.reviveUsed.%{_last}%} to true
+
+            # --- Музыка ЛМС: выбор по слоям (сюжет/кастом/праздник/обычный) — lms.sk ---
+            playLmsTrack({_killer}, {_last})
+
+            # --- Таймер ЛМС теперь тоже в боссбаре, а не тихий wait. Основной
+            #     таймер режима "Время" ставится на паузу на всё время дуэли
+            #     ({round.duelActive}), чтобы два боссбара не спорили на экране. ---
+            set {round.duelActive} to true
+            set {_duelLeft} to 135
+            if {debug.mode} is true:
+                set {_duelLeft} to 10
+            set {_duelMax} to {_duelLeft}
+            execute console command "bossbar remove round:duel"
+            execute console command "bossbar add round:duel ""ЛМС"""
+            execute console command "bossbar set round:duel max 1000"
+            execute console command "bossbar set round:duel color red"
+            execute console command "bossbar set round:duel style progress"
+            execute console command "tag @a remove lms_duel"
+            execute console command "tag %{_killer}% add lms_duel"
+            execute console command "tag %{_last}% add lms_duel"
+            execute console command "bossbar set round:duel players @a[tag=lms_duel]"
+            loop {_duelLeft} times:
+                if {round.active} is false:
+                    stop
+                if {round.id} is not {_myRoundId}:
+                    stop
+                set {_minutes} to floor({_duelLeft} / 60)
+                set {_secs} to {_duelLeft} - ({_minutes} * 60)
+                set {_seconds} to "%{_secs}%"
+                if {_secs} < 10:
+                    set {_seconds} to "0%{_secs}%"
+                set {_value} to floor(({_duelLeft} / {_duelMax}) * 1000)
+                execute console command "bossbar set round:duel name {""text"":""⚔ ЛМС: %{_minutes}%:%{_seconds}%"",""color"":""red""}"
+                execute console command "bossbar set round:duel value %{_value}%"
+                wait 1 second
+                remove 1 from {_duelLeft}
+            delete {round.duelActive}
+            execute console command "bossbar remove round:duel"
+            execute console command "tag @a remove lms_duel"
+            if {round.active} is true:
+                if {round.id} is {_myRoundId}:
+                    if {round.survivorsAlive} = 1:
+                        addAnger({_last}, 1.5)
+                        awardXP({_last}, {char.%{_last}%}, 45)
+                        addStatWin("survivor")
+                        stopRound("&a&lВЫЖИВШИЙ ВЫЖИЛ! Время дуэли истекло — победа выжившего!")
+
+# --- Общая функция завершения раунда ---
+function stopRound(message: text):
+    set {round.active} to false
+    delete {blind.trail::*}
+    delete {round.maniac}
+    delete {round.maniacName}
+    execute console command "/gamerule naturalRegeneration true"
+    broadcast {_message}
+
+    # --- Музыка ЛМС может быть длиннее самой дуэли (2:15) — если раунд кончился
+    #     раньше (например, убийца добил последнего выжившего до истечения таймера),
+    #     трек сам по себе не остановится, обрываем его явно всем (lms.sk) ---
+    stopLmsMusic()
+    loop all players:
+        if {map.%{round.map}%.ambient.sound} is set:
+            execute console command "/stopsound %loop-player% * %{map.%{round.map}%.ambient.sound}%"
+        stopChaseMusic(loop-player)
+        delete {chase.active.%loop-player%}
+        delete {chase.nextLoop.%loop-player%}
+        delete {bloodlust.timer.%loop-player%}
+        delete {stunShield.%loop-player%}
+        delete {staggered.%loop-player%}
+        delete {project.dashStack.%loop-player%}
+        delete {project.dashStackToken.%loop-player%}
+        delete {project.channeling.%loop-player%}
+        delete {project.stunImmune.%loop-player%}
+        delete {project.rushReadyAt.%loop-player%}
+        delete {maniac.boostUntil.%loop-player%}
+        delete {maniac.boostTier.%loop-player%}
+        execute console command "/team leave %loop-player%"
+    delete {chase.activeSound}
+    delete {ambient.nextPlay}
+    delete {menu.music.nextPlay}
+    delete {round.timeLeft}
+    delete {round.timeMax}
+    delete {round.duelActive}
+    delete {round.barCreated}
+    delete {round.live}
+    execute console command "bossbar remove round:timer"
+    execute console command "bossbar remove round:duel"
+    execute console command "tag @a remove lms_duel"
+
+    loop {necro.activeZombies::*}:
+        kill loop-value
+    delete {necro.activeZombies::*}
+
+    loop {denden.creepers::*}:
+        kill loop-value
+    delete {denden.creepers::*}
+
+    loop {project.jawPoints::*}:
+        delete {project.jawBorn.%loop-value%}
+    delete {project.jawPoints::*}
+    delete {project.jawHitDone}
+    delete {project.infectedCount}
+    delete {project.infectedGens::*}
+
+    loop {mapItemEntities::*}:
+        kill loop-value
+    delete {mapItemEntities::*}
+
+    loop all players:
+        set {_p} to loop-player
+        clear the active and hidden potion effects of {_p}
+        set walk speed of {_p} to 0.2
+        delete {project.freezeToken.%{_p}%}
+        destroySanyaStructures({_p})
+        set {char.%{_p}%} to nothing
+        resetPlayerSkin({_p})
+        delete {alive.%{_p}%}
+        set max health of {_p} to 10
+        set health of {_p} to 10
+        delete {armorHidden.%{_p}%}
+        delete {savedArmor.helmet.%{_p}%}
+        delete {savedArmor.chest.%{_p}%}
+        delete {savedArmor.legs.%{_p}%}
+        delete {savedArmor.boots.%{_p}%}
+        delete {anomaly.traps.%{_p}%::*}
+        delete {anomaly.stalking.%{_p}%}
+        sporeClear({_p})
+        if {lobby.spawn} is set:
+            teleport {_p} to {lobby.spawn}
+        clear inventory of {_p}
+        set gamemode of {_p} to adventure
+        giveLobbyItems({_p})
+
+    # --- Таймер 1 минута до следующего раунда ---
+    if {autoround.enabled} is true:
+        broadcast "&eСледующий раунд начнётся через &c1 минуту&e!"
+        wait 30 seconds
+        if {autoround.enabled} is true:
+            if {round.active} is false:
+                broadcast "&c&lВНИМАНИЕ! &eДо начала нового раунда осталось &c30 секунд&e!"
+                wait 30 seconds
+                if {autoround.enabled} is true:
+                    if {round.active} is false:
+                        autoStartRound("random")
+
+# =========================================================
+# Выход игрока во время раунда
+# ---------------------------------------------------------
+#  * Убийца вышел -> раунд завершается.
+#  * Выжившие: игрок убирается из списка живых, у него чистится кит и
+#    состояние, убийце даётся +40 сек (как за убийство).
+#      - если выживший вышел во время ЛМС -> раунд завершается;
+#      - если живых не осталось -> раунд завершается;
+#      - если остался один живой -> начинается ЛМС (как при смерти).
+#  * Если выход не успел обработаться (краш), то же самое делается при входе.
+# Флаг {alive.%p%} ставится только при телепорте на карту, поэтому
+# вышедший ДО телепорта в счёт живых не входит и ничего не отнимает.
+# =========================================================
+function cleanupLeftPlayer(p: player):
+    clear the active and hidden potion effects of {_p}
+    set walk speed of {_p} to 0.2
+    delete {project.freezeToken.%{_p}%}
+    destroySanyaStructures({_p})
+    set {char.%{_p}%} to nothing
+    resetPlayerSkin({_p})
+    delete {alive.%{_p}%}
+    set max health of {_p} to 10
+    set health of {_p} to 10
+    delete {armorHidden.%{_p}%}
+    delete {savedArmor.helmet.%{_p}%}
+    delete {savedArmor.chest.%{_p}%}
+    delete {savedArmor.legs.%{_p}%}
+    delete {savedArmor.boots.%{_p}%}
+    delete {anomaly.traps.%{_p}%::*}
+    delete {anomaly.stalking.%{_p}%}
+    sporeClear({_p})
+    delete {chase.active.%{_p}%}
+    delete {chase.nextLoop.%{_p}%}
+    delete {bloodlust.timer.%{_p}%}
+    delete {maniac.boostUntil.%{_p}%}
+    delete {maniac.boostTier.%{_p}%}
+    clear inventory of {_p}
+    set gamemode of {_p} to adventure
+    if {lobby.spawn} is set:
+        teleport {_p} to {lobby.spawn}
+
+function playerLeftRound(p: player):
+    if {round.active} is not true:
+        stop
+    if {char.%{_p}%} is not set:
+        stop
+    set {_char} to {char.%{_p}%}
+    set {_wasAlive} to {alive.%{_p}%}
+
+    # --- Убийца вышел: раунд заканчиваем ---
+    if isManiac({_char}) is true:
+        cleanupLeftPlayer({_p})
+        stopRound("&c&lУбийца вышел из игры — раунд завершён.")
+        stop
+
+    # --- Выживший ---
+    cleanupLeftPlayer({_p})
+    if {_wasAlive} is not true:
+        # Был мёртв (наблюдатель) или вышел до телепорта — в счёт живых не входит.
+        stop
+    if {round.duelActive} is true:
+        stopRound("&c&lВыживший вышел из игры во время ЛМС — раунд завершён.")
+        stop
+    remove 1 from {round.survivorsAlive}
+    broadcast "&e%{_p}% покинул игру и выбыл из раунда."
+    # --- Режим "Время": убийце +40 сек, как за убийство ---
+    if {round.timeLeft} is set:
+        add {@killerTimeBonus} to {round.timeLeft}
+        updateRoundBossBar()
+    if {round.survivorsAlive} <= 0:
+        stopRound("&4&lМАНЬЯК ПОБЕДИЛ! Выжившие покинули игру.")
+    else if {round.survivorsAlive} = 1:
+        startFinalDuel()
+
+on quit:
+    playerLeftRound(player)
+
+# Страховка: если выход не обработался (краш/перезапуск), дочищаем при входе.
+on join:
+    if {round.active} is true:
+        if {char.%player%} is set:
+            playerLeftRound(player)

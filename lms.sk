@@ -1,0 +1,220 @@
+# =========================================================
+# lms.sk — выбор музыки финальной дуэли (ЛМС) по слоям.
+#
+# Раньше выбор был размазан: сюжетные пары — прямо в startFinalDuel()
+# (round.sk), остальное — в playFallbackLmsTrack() (event.sk), а список
+# треков для /stopsound дублировался в stopRound(). Теперь всё здесь:
+#   resolveLmsTrack() — чистая функция "кто против кого -> какой трек"
+#   playLmsTrack()    — играет то, что выбрала resolveLmsTrack()
+#   stopLmsMusic()    — гасит ТО, что реально играло ({lms.playing})
+#
+# Слои, сверху вниз (первый подошедший выигрывает):
+#   1. Сюжетный-парный-кастомный — персонажи сюжетная пара (ДэнДэн + Михуилонг / Саня),
+#      НО у их скинов есть свой парный/тематический ЛМС (Шеф-повар + Огузок):
+#      он ЗАМЕНЯЕТ сюжетный трек ("Король динамита")
+#   2. Сюжетный-парный           — сюжетная пара без кастомных скинов
+#   3. Парный-кастомный          — те же кастомные скины, но персонажи НЕ сюжетная
+#      пара: точная пара (/setskinlmspair) или общая тема (/setskintheme + /setthemelms)
+#   4. Одиночный-кастомный-выживший — у скина выжившего свой ЛМС
+#   5. Одиночный-кастомный-убийца   — у скина убийцы свой ЛМС
+#   *  Big Game — оба на 4-м милстоуне (остался из старой системы, стоит
+#      прямо над праздничным: как и раньше, он "специфичнее" праздничного)
+#   6. Праздничный — идёт любой ивент (isAnyEventActive() в event.sk)
+#   7. Обычный     — Kladlend, Now Run
+#
+# Какой скин на ком — берётся из getWornSkin() (skins.sk): это скин,
+# который реально надели на старте раунда, а не тот, что выбран сейчас.
+# =========================================================
+
+# --- Сюжетные пары (убийца + выживший -> трек). Новая пара = новая строка. ---
+function getStoryLmsSound(kc: text, sc: text) :: text:
+    if {_kc} is "denden":
+        if {_sc} is "mihuilong":
+            return "kladlend:king_of_tnt"
+        else if {_sc} is "sanya":
+            return "kladlend:old_friend"
+    else if {_kc} is "anomaly":
+        if {_sc} is "thomas":
+            return "kladlend:you_slow"
+    else if {_kc} is "necromancer":
+        if {_sc} is "mayor":
+            return "kladlend:apokalipsis_neo"
+    else if {_kc} is "project":
+        if {_sc} is "hacker":
+            return "kladlend:divine_game"
+    else if {_kc} is "blind":
+        if {_sc} is "mayor":
+            return "kladlend:apokalipsis_neo"
+    return ""
+
+# Название трека для объявления в чате. Известным трекам — красивое имя,
+# остальным (кастомные) — из id: "kladlend:halloween_run" -> "halloween run".
+function lmsTrackTitle(sound: text) :: text:
+    if {_sound} is "kladlend:king_of_tnt":
+        return "King of TNT"
+    else if {_sound} is "kladlend:old_friend":
+        return "Old Friend"
+    else if {_sound} is "kladlend:you_slow":
+        return "You Slow"
+    else if {_sound} is "kladlend:apokalipsis_neo":
+        return "Apokalipsis Neo"
+    else if {_sound} is "kladlend:divine_game":
+        return "Divine Game"
+    else if {_sound} is "kladlend:big_game":
+        return "BIG GAME"
+    else if {_sound} is "kladlend:holiday_now_run":
+        return "Kladlend, Holiday Run"
+    else if {_sound} is "kladlend:now_run":
+        return "Kladlend, Now Run"
+    set {_t} to {_sound}
+    if {_t} contains ":":
+        set {_parts::*} to {_t} split at ":"
+        set {_t} to last element of {_parts::*}
+    replace all "_" with " " in {_t}
+    return {_t}
+
+# Ключ пары скинов в таблицах {lms.pair::*}.
+function pairKey(kc: text, ks: text, sc: text, ss: text) :: text:
+    return "%{_kc}%~%{_ks}%~%{_sc}%~%{_ss}%"
+
+# Ядро. Возвращает "слой;трек;название;цвет" одной строкой.
+# bothMax — оба дуэлянта на 4-м милстоуне (считает вызывающий, т.к. нужны
+# игроки; для проб через /lmsprobe передаётся false).
+function resolveLmsTrack(kc: text, ks: text, sc: text, ss: text, bothMax: boolean) :: text:
+    set {_key} to pairKey({_kc}, {_ks}, {_sc}, {_ss})
+    set {_story} to getStoryLmsSound({_kc}, {_sc})
+
+    # --- кастомный ЛМС пары скинов: точная пара, затем общая тема ---
+    set {_cp} to ""
+    set {_cpName} to "Парный-кастомный"
+    if {lms.pair::%{_key}%} is set:
+        set {_cp} to {lms.pair::%{_key}%}
+    else:
+        set {_kt} to {skin.theme.%{_kc}%.%{_ks}%}
+        set {_st} to {skin.theme.%{_sc}%.%{_ss}%}
+        if {_kt} is set:
+            if {_kt} is {_st}:
+                if {theme.lms.%{_kt}%} is set:
+                    set {_cp} to {theme.lms.%{_kt}%}
+                    set {_cpName} to "Парный-кастомный (тема %{_kt}%)"
+
+    # --- слои 1-3: пара скинов (кастом заменяет сюжетный трек) ---
+    if {_cp} is not "":
+        if {_story} is not "":
+            return "Сюжетный-парный-кастомный;%{_cp}%;%lmsTrackTitle({_cp})%;&6"
+        return "%{_cpName}%;%{_cp}%;%lmsTrackTitle({_cp})%;&6"
+    if {_story} is not "":
+        return "Сюжетный-парный;%{_story}%;%lmsTrackTitle({_story})%;&6"
+
+    # --- слои 4-5: одиночные кастомные (выживший приоритетнее убийцы) ---
+    if {skin.lmsSolo.%{_sc}%.%{_ss}%} is set:
+        set {_snd} to {skin.lmsSolo.%{_sc}%.%{_ss}%}
+        return "Одиночный-кастомный-выживший;%{_snd}%;%lmsTrackTitle({_snd})%;&6"
+    if {skin.lmsSolo.%{_kc}%.%{_ks}%} is set:
+        set {_snd} to {skin.lmsSolo.%{_kc}%.%{_ks}%}
+        return "Одиночный-кастомный-убийца;%{_snd}%;%lmsTrackTitle({_snd})%;&6"
+
+    # --- Big Game (наследие старой системы) ---
+    if {_bothMax} is true:
+        return "Big Game;kladlend:big_game;BIG GAME;&5"
+
+    # --- слои 6-7 ---
+    if isAnyEventActive() is true:
+        return "Праздничный;kladlend:holiday_now_run;Kladlend, Holiday Run;&d"
+    return "Обычный;kladlend:now_run;Kladlend, Now Run;&6"
+
+# Вызывается из startFinalDuel() (round.sk) вместо цепочки if/else.
+function playLmsTrack(killer: player, last: player):
+    set {_kc} to {char.%{_killer}%}
+    set {_sc} to {char.%{_last}%}
+    set {_ks} to getWornSkin({_killer}, {_kc})
+    set {_ss} to getWornSkin({_last}, {_sc})
+    set {_bothMax} to false
+    if hasMaxMilestone({_killer}, {_kc}) is true:
+        if hasMaxMilestone({_last}, {_sc}) is true:
+            set {_bothMax} to true
+
+    set {_res} to resolveLmsTrack({_kc}, {_ks}, {_sc}, {_ss}, {_bothMax})
+    set {_r::*} to {_res} split at ";"
+    broadcast colored "%{_r::4}%&l♫ %{_r::3}% ♫"
+    loop all players:
+        play sound {_r::2} to loop-player
+    set {lms.playing} to {_r::2}
+    if {debug.mode} is true:
+        send "&8[ЛМС] слой: %{_r::1}% | трек: %{_r::2}%" to {_killer}
+        send "&8[ЛМС] слой: %{_r::1}% | трек: %{_r::2}%" to {_last}
+
+# Гасит трек ЛМС всем. Список не нужно дублировать: играет ровно то, что
+# запомнил playLmsTrack(); встроенные треки — страховка на случай, если
+# {lms.playing} пропал (например, после перезагрузки скриптов посреди раунда).
+function stopLmsMusic():
+    set {_s::*} to "kladlend:now_run", "kladlend:holiday_now_run", "kladlend:big_game", "kladlend:king_of_tnt", "kladlend:old_friend", "kladlend:you_slow", "kladlend:apokalipsis_neo" and "kladlend:divine_game"
+    if {lms.playing} is set:
+        add {lms.playing} to {_s::*}
+    loop {_s::*}:
+        set {_snd} to loop-value
+        loop all players:
+            execute console command "/stopsound %loop-player% * %{_snd}%"
+    delete {lms.playing}
+
+# =========================================================
+# Админ-команды регистрации ЛМС-треков скинов.
+# Персонаж — id (denden, andrey...), скин — id скина; классический скин
+# имеет id самого персонажа. Трек — id звука из ресурспака (kladlend:...).
+# =========================================================
+
+# Одиночный: у скина свой ЛМС при любом сопернике. Сторона определяется
+# персонажем (убийца/выживший) — слои 5 и 4.
+command /setskinlmssolo <text> <text> <text>:
+    permission: op
+    trigger:
+        set {skin.lmsSolo.%arg-1%.%arg-2%} to arg-3
+        if isManiac(arg-1) is true:
+            send "&aОдиночный ЛМС убийцы %arg-1%/%arg-2%: %arg-3%" to player
+        else:
+            send "&aОдиночный ЛМС выжившего %arg-1%/%arg-2%: %arg-3%" to player
+
+# Парный: именно эта пара скинов (убийца + выживший). Если персонажи —
+# сюжетная пара, этот трек заменяет сюжетный (слой 1).
+command /setskinlmspair <text> <text> <text> <text> <text>:
+    permission: op
+    trigger:
+        if isManiac(arg-1) is not true:
+            send "&cПервый персонаж должен быть убийцей: /setskinlmspair <убийца> <скин> <выживший> <скин> <трек>" to player
+            stop
+        if isManiac(arg-3) is true:
+            send "&cТретий аргумент должен быть выжившим." to player
+            stop
+        set {_key} to pairKey(arg-1, arg-2, arg-3, arg-4)
+        set {lms.pair::%{_key}%} to arg-5
+        send "&aПарный ЛМС %arg-1%/%arg-2% + %arg-3%/%arg-4%: %arg-5%" to player
+
+command /clearskinlmspair <text> <text> <text> <text>:
+    permission: op
+    trigger:
+        set {_key} to pairKey(arg-1, arg-2, arg-3, arg-4)
+        delete {lms.pair::%{_key}%}
+        send "&aПарный ЛМС этой пары скинов убран." to player
+
+# Тематический: скины убийц и выживших объединяются общей темой; если на
+# дуэлянтах скины ОДНОЙ темы — играет трек темы (слой 3, после точных пар).
+command /setskintheme <text> <text> <text>:
+    permission: op
+    trigger:
+        set {skin.theme.%arg-1%.%arg-2%} to arg-3
+        send "&aСкин %arg-1%/%arg-2% теперь в теме '%arg-3%'." to player
+
+command /setthemelms <text> <text>:
+    permission: op
+    trigger:
+        set {theme.lms.%arg-1%} to arg-2
+        send "&aТрек ЛМС темы '%arg-1%': %arg-2%" to player
+
+# Пробный прогон без раунда: какой слой/трек выберется для этих скинов.
+# Big Game в пробе не учитывается (он зависит от уровней игроков).
+command /lmsprobe <text> <text> <text> <text>:
+    permission: op
+    trigger:
+        set {_res} to resolveLmsTrack(arg-1, arg-2, arg-3, arg-4, false)
+        set {_r::*} to {_res} split at ";"
+        send "&eЛМС %arg-1%/%arg-2% vs %arg-3%/%arg-4%: &fслой &6%{_r::1}%&f, трек &6%{_r::2}%" to player

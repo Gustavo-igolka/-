@@ -1,0 +1,225 @@
+# =========================================================
+# setup.sk — базовые правила мира, карты и точки спавна
+# =========================================================
+
+# --- Регистрация карт ---
+command /listmaps:
+    permission: op
+    trigger:
+        if size of {maps::*} is 0:
+            send "&cКарт пока не добавлено. Используй /addmap <имя>" to player
+            stop
+        send "&e&lСписок карт (%size of {maps::*}%):" to player
+        loop {maps::*}:
+            send "&7- &f%loop-value%" to player
+
+command /checkround <text>:
+    permission: op
+    trigger:
+        set {_map} to arg-1
+        send "&e&l— Проверка готовности карты '%{_map}%' —" to player
+
+        if {map.%{_map}%.maniac.spawn} is set:
+            send "&a✔ Точка маньяка установлена" to player
+        else:
+            send "&c✘ Нет точки маньяка (/setmaniacspawn %{_map}%)" to player
+
+        if size of {map.%{_map}%.survivor.spawns::*} > 0:
+            send "&a✔ Точки выживших: %size of {map.%{_map}%.survivor.spawns::*}%" to player
+        else:
+            send "&c✘ Нет точек выживших (/setsurvivorspawn %{_map}%)" to player
+
+        if size of {map.%{_map}%.item.spawns::*} > 0:
+            send "&a✔ Точки предметов: %size of {map.%{_map}%.item.spawns::*}%" to player
+        else:
+            send "&e⚠ Нет точек предметов (/setitemspawn %{_map}%) — предметы в этом раунде не появятся, это не критично" to player
+
+        if {map.%{_map}%.ambient.sound} is set:
+            send "&a✔ Эмбиент: %{map.%{_map}%.ambient.sound}% (каждые %{map.%{_map}%.ambient.duration}% сек)" to player
+        else:
+            send "&e⚠ Эмбиент не задан (/setambient %{_map}% <звук> <секунды>) — не критично" to player
+
+        if {lobby.spawn} is set:
+            send "&a✔ Лобби установлено" to player
+        else:
+            send "&c✘ Лобби не установлено (/setlobby)" to player
+
+        if {wait.maniac.spawn} is set:
+            send "&a✔ Комната ожидания убийцы установлена" to player
+        else:
+            send "&c✘ Нет комнаты ожидания убийцы (/setwaitmaniac)" to player
+
+        if {wait.survivor.spawn} is set:
+            send "&a✔ Комната ожидания выживших установлена" to player
+        else:
+            send "&c✘ Нет комнаты ожидания выживших (/setwaitsurvivor)" to player
+
+        set {_signedUp} to 0
+        loop all players:
+            set {_hasPref} to false
+            if {char.maniacPref.%loop-player%} is set:
+                set {_hasPref} to true
+            else if {char.survivorPref.%loop-player%} is set:
+                set {_hasPref} to true
+            if {_hasPref} is true:
+                add 1 to {_signedUp}
+
+        if {_signedUp} > 0:
+            send "&a✔ Игроков с сохранённым предпочтением роли: %{_signedUp}%" to player
+        else:
+            send "&c✘ Никто ещё не проходил /choosemaniac или /choosesurvivor" to player
+
+        send "&7(Кто именно станет убийцей — решает злость в момент /startround, тут это не проверить заранее)" to player
+
+        send "&e&l— Конец проверки —" to player
+
+command /addmap <text>:
+    permission: op
+    trigger:
+        add arg-1 to {maps::*}
+        send "&aКарта '%arg-1%' добавлена. Всего карт: %size of {maps::*}%" to player
+
+# --- Точки на конкретной карте (пиши имя карты как аргумент) ---
+command /setmaniacspawn <text>:
+    permission: op
+    trigger:
+        set {map.%arg-1%.maniac.spawn} to location of player
+        send "&aТочка маньяка для карты '%arg-1%' установлена." to player
+
+command /setsurvivorspawn <text>:
+    permission: op
+    trigger:
+        add location of player to {map.%arg-1%.survivor.spawns::*}
+        send "&aТочка выжившего для карты '%arg-1%' добавлена. Всего точек: %size of {map.%arg-1%.survivor.spawns::*}%" to player
+
+# --- Точки спавна предметов (аптечка/скорость) — необязательные, но без них предметы не появятся ---
+command /setitemspawn <text>:
+    permission: op
+    trigger:
+        add location of player to {map.%arg-1%.item.spawns::*}
+        send "&aТочка предмета для карты '%arg-1%' добавлена. Всего точек: %size of {map.%arg-1%.item.spawns::*}%" to player
+
+# --- Эмбиент карты: фоновый звук, играет в цикле всем игрокам, пока раунд идёт
+#     именно на этой карте. Необязательно, как и точки предметов. ---
+command /setambient <text> <text> <number>:
+    permission: op
+    trigger:
+        set {map.%arg-1%.ambient.sound} to arg-2
+        set {map.%arg-1%.ambient.duration} to arg-3
+        send "&aЭмбиент для карты '%arg-1%' установлен: %arg-2% (повтор каждые %arg-3% сек)." to player
+
+command /clearambient <text>:
+    permission: op
+    trigger:
+        delete {map.%arg-1%.ambient.sound}
+        delete {map.%arg-1%.ambient.duration}
+        send "&aЭмбиент для карты '%arg-1%' убран." to player
+
+# --- Музыка погони: свой трек на каждого убийцу (denden/necromancer/anomaly),
+#     запускается когда убийца в 15 блоках от выжившего, гаснет дальше 20 (гистерезис,
+#     чтобы не дёргалось туда-сюда на границе). Длительность — для зацикливания,
+#     как у эмбиента: указывай точную длину файла. ---
+command /setchasemusic <text> <text> <number>:
+    permission: op
+    trigger:
+        set {chase.sound.%arg-1%} to arg-2
+        set {chase.duration.%arg-1%} to arg-3
+        send "&aМузыка погони для '%arg-1%' установлена: %arg-2% (цикл каждые %arg-3% сек)." to player
+
+command /clearchasemusic <text>:
+    permission: op
+    trigger:
+        delete {chase.sound.%arg-1%}
+        delete {chase.duration.%arg-1%}
+        send "&aМузыка погони для '%arg-1%' убрана." to player
+
+# --- Музыка меню/лобби: играет всем на сервере, пока НЕ идёт раунд.
+#     Глохнет, как только стартует /startround, возвращается, как только
+#     раунд заканчивается (в т.ч. в паузах автоцикла между раундами). ---
+command /setmenumusic <text> <number>:
+    permission: op
+    trigger:
+        set {menu.music.sound} to arg-1
+        set {menu.music.duration} to arg-2
+        send "&aМузыка меню установлена: %arg-1% (цикл каждые %arg-2% сек)." to player
+
+command /clearmenumusic:
+    permission: op
+    trigger:
+        delete {menu.music.sound}
+        delete {menu.music.duration}
+        send "&aМузыка меню убрана." to player
+
+# --- Общие точки (одни на весь сервер, не привязаны к карте) ---
+command /setlobby:
+    permission: op
+    trigger:
+        set {lobby.spawn} to location of player
+        send "&aЛобби установлено." to player
+
+command /setwaitmaniac:
+    permission: op
+    trigger:
+        set {wait.maniac.spawn} to location of player
+        send "&aТочка ожидания/выбора убийцы установлена." to player
+
+command /setwaitsurvivor:
+    permission: op
+    trigger:
+        set {wait.survivor.spawn} to location of player
+        send "&aТочка ожидания/выбора выживших установлена." to player
+
+# --- Скрытие ников над головой на время раунда (Minecraft 1.19.4) ---
+on load:
+    execute console command "/gamerule sendCommandFeedback false"
+    execute console command "/gamerule logAdminCommands false"
+    execute console command "/bossbar remove round:timer"
+    execute console command "/bossbar remove round:duel"
+    execute console command "/team remove hide_names"
+    execute console command "/team add hide_names"
+    execute console command "/team modify hide_names nametagVisibility never"
+
+on join:
+    if {lobby.spawn} is set:
+        teleport player to {lobby.spawn}
+    set gamemode of player to adventure
+    send "&7Ожидай приглашения выбрать роль." to player
+    if {round.active} is false:
+        if {menu.music.sound} is set:
+            execute console command "/playsound %{menu.music.sound}% music %player%"
+        giveLobbyItems(player)
+
+on break:
+    if gamemode of player is adventure:
+        cancel event
+
+on place:
+    if gamemode of player is adventure:
+        cancel event
+
+# Вечная сытость во время раунда — никто не должен думать о еде в хорроре
+every 5 seconds:
+    if {round.active} is true:
+        loop all players:
+            set food level of loop-player to 20
+            set saturation of loop-player to 20
+
+# --- Лобби: без голода и без драк между игроками. Пока раунд не идёт
+#     ({round.active} ложно), еда всегда полная, а урон игрока по игроку
+#     отменяется. Во время раунда правила урона задаёт abilities.sk. ---
+on food level change:
+    if {round.active} is not true:
+        cancel event
+        set food level of player to 10
+
+on damage:
+    if {round.active} is not true:
+        if attacker is a player:
+            if victim is a player:
+                cancel event
+
+every 5 seconds:
+    if {round.active} is not true:
+        loop all players:
+            if food level of loop-player < 10:
+                set food level of loop-player to 10

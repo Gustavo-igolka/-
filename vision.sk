@@ -1,0 +1,225 @@
+# =========================================================
+# vision.sk — кулдауны в хотбаре (экшнбар) и вижены (боссбар) + анти-невидимая броня.
+#
+#  * ЭКШНБАР: строка кулдаунов способностей персонажа, зелёным — готово,
+#    красным — сколько секунд осталось. У Кирилла спереди ячейки Импланта,
+#    у Рататуя — расстояние до метки. Пока игрок держит генератор, экшнбар
+#    занят прогрессом генератора (generators.sk) — его не перекрываем.
+#  * БОССБАР (личный, под таймером раунда): вижены — убийца видит ближайшего
+#    выжившего, МякШмяка — ближайшего союзника, Томас — расстояние до убийцы.
+#
+# Остаток кулдауна лежит в {cdr::<ключ>.<игрок>} (секунды), его ставит tryCooldown()
+# в abilities.sk, а уменьшается он здесь раз в секунду (в cdLine).
+#
+# ОТКАТ: чтобы вернуть старое поведение (вижены в экшнбаре) — верни прежний
+# vision.sk. abilities.sk при этом можно оставить новым.
+# =========================================================
+
+every 1 second:
+    if {round.active} is true:
+        loop all players:
+            set {_p} to loop-player
+
+            # --- Броня против невидимости: у зелья невидимости своя "дыра" в ваниле —
+            #     оно прячет модель, но НЕ прячет надетую броню. Раньше это было не
+            #     важно (никто не носил броню), но фейк-сеты за уровни (levels.sk)
+            #     теперь реально надеваются на тело — и невидимка светится комплектом
+            #     парящих доспехов. Поэтому: пока активна невидимость — временно снимаем
+            #     броню и прячем в переменные, как только эффект спал — возвращаем.
+            if {_p} has a potion effect of invisibility:
+                if {armorHidden.%{_p}%} is not true:
+                    set {armorHidden.%{_p}%} to true
+                    set {savedArmor.helmet.%{_p}%} to helmet of {_p}
+                    set {savedArmor.chest.%{_p}%} to chestplate of {_p}
+                    set {savedArmor.legs.%{_p}%} to leggings of {_p}
+                    set {savedArmor.boots.%{_p}%} to boots of {_p}
+                    set helmet of {_p} to air
+                    set chestplate of {_p} to air
+                    set leggings of {_p} to air
+                    set boots of {_p} to air
+            else if {armorHidden.%{_p}%} is true:
+                delete {armorHidden.%{_p}%}
+                set helmet of {_p} to {savedArmor.helmet.%{_p}%}
+                set chestplate of {_p} to {savedArmor.chest.%{_p}%}
+                set leggings of {_p} to {savedArmor.legs.%{_p}%}
+                set boots of {_p} to {savedArmor.boots.%{_p}%}
+                delete {savedArmor.helmet.%{_p}%}
+                delete {savedArmor.chest.%{_p}%}
+                delete {savedArmor.legs.%{_p}%}
+                delete {savedArmor.boots.%{_p}%}
+
+            # --- Строка кулдаунов (cdBar обязательно вызываем КАЖДУЮ секунду, даже если
+            #     экшнбар сейчас занят генератором: там же идёт отсчёт остатка) ---
+            set {_bar} to ""
+            if {char.%{_p}%} is set:
+                if {alive.%{_p}%} is true:
+                    set {_bar} to cdBar({_p})
+                else if isManiac({char.%{_p}%}) is true:
+                    set {_bar} to cdBar({_p})
+
+            # --- Вижены -> боссбар ---
+            set {_vision} to ""
+            set {_visionColor} to "light_purple"
+            if {char.%{_p}%} is set:
+                if isManiac({char.%{_p}%}) is true:
+                    set {_closest} to 9999
+                    set {_closestName} to ""
+                    loop all players:
+                        set {_s} to loop-player-2
+                        if {char.%{_s}%} is set:
+                            if isManiac({char.%{_s}%}) is false:
+                                if {alive.%{_s}%} is true:
+                                    if {_s} does not have a potion effect of invisibility:
+                                        set {_dist} to distance between {_p} and {_s}
+                                        if {_dist} < {_closest}:
+                                            set {_closest} to {_dist}
+                                            set {_closestName} to "%{_s}%"
+                    if {_closest} < 9999:
+                        set {_vision} to "Вижен: %{_closestName}% (~%round({_closest})% м.)"
+                else if {alive.%{_p}%} is true:
+                    if {char.%{_p}%} is "alexey":
+                        set {_closest} to 9999
+                        set {_closestName} to ""
+                        loop all players:
+                            set {_s} to loop-player-2
+                            if {_s} is not {_p}:
+                                if {char.%{_s}%} is set:
+                                    if isManiac({char.%{_s}%}) is false:
+                                        if {alive.%{_s}%} is true:
+                                            set {_dist} to distance between {_p} and {_s}
+                                            if {_dist} < {_closest}:
+                                                set {_closest} to {_dist}
+                                                set {_closestName} to "%{_s}%"
+                        if {_closest} < 9999:
+                            set {_vision} to "Союзник рядом: %{_closestName}% (~%round({_closest})% м.)"
+                    else if {char.%{_p}%} is "thomas":
+                        if {round.maniac} is set:
+                            set {_dist} to distance between {_p} and {round.maniac}
+                            set {_vision} to "Убийца: ~%round({_dist})% м."
+                            set {_visionColor} to "red"
+            if {_vision} is "":
+                visionBarClear({_p})
+            else:
+                visionBarSet({_p}, {_vision}, {_visionColor})
+
+            # --- Экшнбар (кулдауны). Пока игрок держит генератор — там прогресс генератора. ---
+            if {gen.holding.%{_p}%} is not set:
+                set {_prefix} to ""
+                if {char.%{_p}%} is "hacker":
+                    if {hacker.mark.%{_p}%} is set:
+                        set {_dist} to distance between {_p} and {hacker.mark.%{_p}%}
+                        set {_prefix} to "&b📍 ~%round({_dist})% м. &8| "
+                else if {char.%{_p}%} is "kirill":
+                    if {kirill.cells.%{_p}%} is not set:
+                        set {kirill.cells.%{_p}%} to 0
+                    set {_prefix} to "&eЯчейки &f%{kirill.cells.%{_p}%}%/10 &8| "
+                else if {char.%{_p}%} is "dartikil":
+                    set {_prefix} to "&6Заряды &f%dartCharges({_p})%/3 &8| "
+                    if {dart.pistolBroken.%{_p}%} is true:
+                        set {_prefix} to "%{_prefix}%&c[пистолет сломан] &8| "
+                if {_bar} is not "":
+                    send actionbar "%{_prefix}%%{_bar}%" to {_p}
+
+# --- Вне раунда боссбары вижена убираем у всех ---
+every 2 seconds:
+    if {round.active} is not true:
+        loop all players:
+            if {vis.bar.%loop-player%} is set:
+                visionBarClear(loop-player)
+
+on quit:
+    visionBarClear(player)
+
+on join:
+    visionBarClear(player)
+
+# ---------------------------------------------------------
+# Боссбар вижена (личный боссбар через ванильный /bossbar, id = vision:<uuid>)
+# ---------------------------------------------------------
+function visionBarSet(p: player, txt: text, color: text):
+    set {_u} to "%uuid of {_p}%"
+    if {vis.bar.%{_p}%} is not set:
+        execute console command "bossbar add vision:%{_u}% ""Вижен"""
+        execute console command "bossbar set vision:%{_u}% max 100"
+        execute console command "bossbar set vision:%{_u}% value 0"
+        execute console command "bossbar set vision:%{_u}% players %{_p}%"
+        set {vis.bar.%{_p}%} to true
+    execute console command "bossbar set vision:%{_u}% name {""text"":""%{_txt}%"",""color"":""%{_color}%""}"
+
+function visionBarClear(p: player):
+    if {vis.bar.%{_p}%} is set:
+        set {_u} to "%uuid of {_p}%"
+        execute console command "bossbar remove vision:%{_u}%"
+        delete {vis.bar.%{_p}%}
+
+# ---------------------------------------------------------
+# Кулдауны в хотбаре
+# ---------------------------------------------------------
+# Одна способность: зелёным — готово, красным — осталось N секунд.
+# Заодно уменьшает остаток на 1 (вызывается ровно раз в секунду на игрока).
+function cdLine(p: player, key: text, label: text) :: text:
+    if {cdr::%{_key}%.%{_p}%} is set:
+        if {cdr::%{_key}%.%{_p}%} > 0:
+            remove 1 from {cdr::%{_key}%.%{_p}%}
+            if {cdr::%{_key}%.%{_p}%} > 0:
+                return "&c%{_label}% %{cdr::%{_key}%.%{_p}%}%с"
+    return "&a%{_label}% ✔"
+
+# Какие способности показываем у какого персонажа: ключи — те же, что в tryCooldown().
+function cdBar(p: player) :: text:
+    delete {_k::*}
+    delete {_l::*}
+    set {_c} to {char.%{_p}%}
+    if {_c} is "andrey":
+        set {_k::*} to "andrey_speed", "andrey_resist" and "andrey_invis"
+        set {_l::*} to "Скорость", "Стойкость" and "Невид."
+    else if {_c} is "hacker":
+        set {_k::*} to "hacker_teleport" and "hacker_cheat"
+        set {_l::*} to "Телепорт" and "Сила"
+    else if {_c} is "dartikil":
+        set {_k::*} to "dart_coin", "dart_pistol", "dart_sign" and "dart_hat"
+        set {_l::*} to "Монета", "Пистолет", "Знак" and "Шляпа"
+    else if {_c} is "kirill":
+        set {_k::*} to "kirill_dash" and "kirill_implant"
+        set {_l::*} to "Рывок" and "Имплант"
+    else if {_c} is "mihuilong":
+        set {_k::*} to "mihu_stun"
+        set {_l::*} to "Стан"
+    else if {_c} is "ilya":
+        set {_k::*} to "ilya_blade" and "ilya_paint"
+        set {_l::*} to "Клинок" and "Краска"
+    else if {_c} is "mayor":
+        set {_k::*} to "mayor_perry", "mayor_kick" and "mayor_strike"
+        set {_l::*} to "Перри", "Пинок" and "Удар"
+    else if {_c} is "sanya":
+        set {_k::*} to "sanya_turret" and "sanya_dispenser"
+        set {_l::*} to "Турель" and "Раздатчик"
+    else if {_c} is "alexey":
+        set {_k::*} to "alexey_heal" and "alexey_pearl"
+        set {_l::*} to "Лечение" and "Рывок"
+    else if {_c} is "thomas":
+        set {_k::*} to "thomas_speed", "thomas_slow" and "thomas_resist"
+        set {_l::*} to "Скорость", "Замедл." and "Стойк."
+    else if {_c} is "denden":
+        set {_k::*} to "denden_hook", "denden_creeper" and "denden_speed"
+        set {_l::*} to "Крюк", "Крипер" and "Скорость"
+    else if {_c} is "necromancer":
+        set {_k::*} to "necro_bow" and "necro_block"
+        set {_l::*} to "Лук" and "Дыхание"
+    else if {_c} is "anomaly":
+        set {_k::*} to "anomaly_arrow", "anomaly_stalk" and "anomaly_trap"
+        set {_l::*} to "Луч", "Сталк" and "Капкан"
+    else if {_c} is "project":
+        set {_k::*} to "project_jaws", "project_rush" and "project_teleport"
+        set {_l::*} to "Челюсти", "Рывок" and "Телепорт"
+    else if {_c} is "blind":
+        set {_k::*} to "blind_veil", "blind_rage" and "blind_burst"
+        set {_l::*} to "Завеса", "Ярость" and "Прорастание"
+    set {_out} to ""
+    loop {_k::*}:
+        set {_part} to cdLine({_p}, loop-value, {_l::%loop-index%})
+        if {_out} is "":
+            set {_out} to {_part}
+        else:
+            set {_out} to "%{_out}% &8| %{_part}%"
+    return {_out}

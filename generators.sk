@@ -1,0 +1,178 @@
+# =========================================================
+# generators.sk — задачи выживших (аналог генераторов из DBD)
+# Наковальни ставишь вручную на карте заранее. Первый клик по новой
+# наковальне регистрирует её в списке {gen.locations::*}, чтобы при
+# следующем /startround или /resetgens можно было вернуть блок обратно
+# в наковальню (раньше починенная наковальня навсегда оставалась колоколом).
+# =========================================================
+
+# --- The Project — Пассивка 1: Заражение. Одновременно заражённых
+#     генераторов не больше 3-х ({project.infectedCount} — активный счётчик,
+#     а не общий лимит за раунд: как только заражённый вылечивают, счётчик
+#     уменьшается и можно заразить следующий). Заражение сразу отбрасывает
+#     прогресс на 30% (не ниже 0%) — эта отметка становится базой для расчёта
+#     "любых 25%" на исцеление (см. every 1 second ниже). ---
+function projectInfectGenerator(p: player, loc: location):
+    if {gen.registered.%{_loc}%} is not true:
+        add {_loc} to {gen.locations::*}
+        set {gen.registered.%{_loc}%} to true
+    if {gen.progress.%{_loc}%} is not set:
+        set {gen.progress.%{_loc}%} to 0
+    if {gen.progress.%{_loc}%} >= 100:
+        send "&7Этот генератор уже починен, заражать нечего." to {_p}
+        stop
+    if {gen.infected.%{_loc}%} is true:
+        send "&7Этот генератор уже заражён." to {_p}
+        stop
+    if {project.infectedCount} is not set:
+        set {project.infectedCount} to 0
+    if {project.infectedCount} >= 3:
+        send "&7Уже заражено максимум генераторов (3 одновременно)." to {_p}
+        stop
+    subtract 30 from {gen.progress.%{_loc}%}
+    if {gen.progress.%{_loc}%} < 0:
+        set {gen.progress.%{_loc}%} to 0
+    set {gen.infected.%{_loc}%} to true
+    set {gen.infectionBase.%{_loc}%} to {gen.progress.%{_loc}%}
+    add 1 to {project.infectedCount}
+    add {_loc} to {project.infectedGens::*}
+    send "&4&lГенератор заражён! (%{project.infectedCount}%/3 одновременно)" to {_p}
+    send actionbar "&eПрогресс генератора: %{gen.progress.%{_loc}%}%%%" to {_p}
+
+# --- Эффекты при полном исцелении заражения (см. every 1 second ниже):
+#     выживший, который снял заражение, получает стак рывка (тот же самый,
+#     что ставит способность 2 "Хакер раш" — общий счётчик/подсветка),
+#     тошноту и замедление 2 на 5 сек; сам Проект получает скорость 1 на
+#     те же 5 сек. Функция projectSetDashStack() определена в abilities.sk. ---
+function projectApplyCureDebuff(target: player):
+    projectSetDashStack({_target})
+    apply nausea 1 to {_target} for 5 seconds
+    apply slowness 2 to {_target} for 5 seconds
+    send "&4Генератор сопротивлялся заражению — тебя тряхнуло!" to {_target}
+    if {round.maniac} is set:
+        maniacBoost({round.maniac}, 5, 1)
+
+on right click on anvil:
+    if {round.active} is true:
+        set {_loc} to location of event-block
+        if {char.%player%} is "project":
+            projectInfectGenerator(player, {_loc})
+            stop
+        if isManiac({char.%player%}) is true:
+            stop
+        if {gen.registered.%{_loc}%} is not true:
+            add {_loc} to {gen.locations::*}
+            set {gen.registered.%{_loc}%} to true
+        if {gen.progress.%{_loc}%} is not set:
+            set {gen.progress.%{_loc}%} to 0
+        if {gen.progress.%{_loc}%} >= 100:
+            send "&7Этот генератор уже починен." to player
+            stop
+        set {gen.holding.%player%} to {_loc}
+        if {gen.infected.%{_loc}%} is true:
+            send actionbar "&c&lПрогресс: %{gen.progress.%{_loc}%}%%% (заражён!)" to player
+        else:
+            send actionbar "&eПрогресс: %{gen.progress.%{_loc}%}%%%" to player
+
+every 1 second:
+    loop all players:
+        set {_p} to loop-player
+        if {gen.holding.%{_p}%} is set:
+            set {_loc} to {gen.holding.%{_p}%}
+            if {_p} is not within 2 blocks of {_loc}:
+                delete {gen.holding.%{_p}%}
+            else:
+                add 4 to {gen.progress.%{_loc}%}
+                if {gen.progress.%{_loc}%} > 100:
+                    set {gen.progress.%{_loc}%} to 100
+                if {gen.infected.%{_loc}%} is true:
+                    # --- Заражён: чинить 25 ЛЮБЫХ процентов (суммарно от базы на момент
+                    #     заражения, неважно кто чинил) ИЛИ дочинить до 100% — снимает
+                    #     заражение и откатывает прогресс до базы заражения. Генератор
+                    #     не может завершиться, пока заражён. ---
+                    set {_base} to 0
+                    if {gen.infectionBase.%{_loc}%} is set:
+                        set {_base} to {gen.infectionBase.%{_loc}%}
+                    set {_diff} to {gen.progress.%{_loc}%} - {_base}
+                    set {_cured} to false
+                    if {_diff} >= 25:
+                        set {_cured} to true
+                    if {gen.progress.%{_loc}%} >= 100:
+                        set {_cured} to true
+                    if {_cured} is true:
+                        set {gen.infected.%{_loc}%} to false
+                        delete {gen.infectionBase.%{_loc}%}
+                        remove {_loc} from {project.infectedGens::*}
+                        if {project.infectedCount} is set:
+                            remove 1 from {project.infectedCount}
+                        set {gen.progress.%{_loc}%} to {_base}
+                        delete {gen.holding.%{_p}%}
+                        send actionbar "&c&lЗаражение снято! Прогресс откатился до %{_base}%%%" to {_p}
+                        projectApplyCureDebuff({_p})
+                    else:
+                        send actionbar "&c&lПрогресс: %{gen.progress.%{_loc}%}%%% (заражён)" to {_p}
+                else if {gen.progress.%{_loc}%} >= 100:
+                    broadcast "&a&lГенератор починен!"
+                    add 1 to {gen.done}
+                    set block at {_loc} to bell
+                    delete {gen.holding.%{_p}%}
+                    # --- Злость + XP за починку гена тому, кто его закончил ---
+                    addAnger({_p}, 1)
+                    awardXP({_p}, {char.%{_p}%}, 30)
+                    chargeKirillCell({_p})
+                    # --- Режим "Время": гены больше не дают победу напрямую, только
+                    #     срезают 10 сек с общего таймера (зеркально +40 сек за убийство) ---
+                    if {round.timeLeft} is set:
+                        remove 10 from {round.timeLeft}
+                        updateRoundBossBar()
+                else:
+                    send actionbar "&eПрогресс: %{gen.progress.%{_loc}%}%%%" to {_p}
+
+# --- Возвращает ВСЕ зарегистрированные наковальни в исходный вид и сбрасывает прогресс ---
+function resetAllGenerators():
+    loop {gen.locations::*}:
+        set {_loc} to loop-value
+        set block at {_loc} to anvil
+        set {gen.progress.%{_loc}%} to 0
+        set {gen.infected.%{_loc}%} to false
+        delete {gen.infectionBase.%{_loc}%}
+    set {gen.done} to 0
+    set {project.infectedCount} to 0
+    delete {project.infectedGens::*}
+
+command /resetgens:
+    permission: op
+    trigger:
+        resetAllGenerators()
+        send "&aГенераторы сброшены и возвращены в исходный вид." to player
+
+# --- Полная очистка: забывает ВСЕ зарегистрированные генераторы и убирает
+#     их блоки с карты. В отличие от resetAllGenerators() (возвращает
+#     наковальни на место для нового раунда), эта функция нужна, когда
+#     надо начать расстановку с нуля — чтобы старые (в т.ч. уже
+#     починенные колокола) не воскресали при /startround. ---
+function clearAllGenerators() :: number:
+    set {_n} to size of {gen.locations::*}
+    loop {gen.locations::*}:
+        set {_loc} to loop-value
+        set block at {_loc} to air
+        delete {gen.progress.%{_loc}%}
+        delete {gen.infected.%{_loc}%}
+        delete {gen.infectionBase.%{_loc}%}
+        delete {gen.registered.%{_loc}%}
+    delete {gen.locations::*}
+    loop all players:
+        delete {gen.holding.%loop-player%}
+    set {gen.done} to 0
+    set {project.infectedCount} to 0
+    delete {project.infectedGens::*}
+    return {_n}
+
+command /cleargens:
+    permission: op
+    trigger:
+        if {round.active} is true:
+            send "&cНельзя чистить генераторы во время раунда." to player
+            stop
+        set {_n} to clearAllGenerators()
+        send "&aВсе генераторы удалены с карты и забыты (&f%{_n}%&a шт.). Ставь новые — они зарегистрируются при первом клике." to player

@@ -1,0 +1,134 @@
+# =========================================================
+# debug.sk — инструменты для соло-тестирования механик без других игроков.
+# Всё под permission: op, на обычную игру не влияет, пока не включишь /debug.
+# =========================================================
+
+# --- Переключатель дебаг-режима: пока включён, длинные таймеры раунда
+#     (реванш-экран, финальная дуэль) в round.sk укорочены — см. правки там. ---
+command /debug:
+    permission: op
+    trigger:
+        if {debug.mode} is true:
+            set {debug.mode} to false
+            send "&7[DEBUG] Режим &cвыключен&7 — таймеры снова обычные." to player
+        else:
+            set {debug.mode} to true
+            send "&7[DEBUG] Режим &aвключен&7 — таймеры раунда укорочены." to player
+
+# --- Мгновенно выдать себе кит + скин любого персонажа, без старта раунда.
+#     Не трогает {round.active}, {char.*Pref.*} и прочее состояние раунда —
+#     чисто "примерить" предметы/абилки персонажа здесь и сейчас. ---
+command /debugchar <text>:
+    permission: op
+    trigger:
+        set {_p} to player
+        set {_id} to arg-1
+        clear inventory of {_p}
+        if {_id} is "denden":
+            give_denden_kit({_p})
+        else if {_id} is "necromancer":
+            give_necromancer_kit({_p})
+        else if {_id} is "anomaly":
+            give_anomaly_kit({_p})
+        else if {_id} is "andrey":
+            give_andrey_kit({_p})
+        else if {_id} is "mihuilong":
+            give_mihuilong_kit({_p})
+        else if {_id} is "alexey":
+            give_alexey_kit({_p})
+        else if {_id} is "ilya":
+            give_ilya_kit({_p})
+        else if {_id} is "hacker":
+            give_hacker_kit({_p})
+        else if {_id} is "thomas":
+            give_thomas_kit({_p})
+        else if {_id} is "mayor":
+            give_mayor_kit({_p})
+        else if {_id} is "sanya":
+            give_sanya_kit({_p})
+        else if {_id} is "kirill":
+            give_kirill_kit({_p})
+        else if {_id} is "dartikil":
+            give_dartikil_kit({_p})
+        else if {_id} is "project":
+            give_project_kit({_p})
+        else if {_id} is "blind":
+            give_blind_kit({_p})
+        else:
+            send "&cНеизвестный id. Варианты: denden, necromancer, anomaly, project, blind, andrey, mihuilong, alexey, ilya, hacker, thomas, mayor, sanya, kirill, dartikil" to {_p}
+            stop
+        set {char.%{_p}%} to {_id}
+        applyCharacterSkin({_p}, {_id})
+        send "&aВыдан кит и скин: %getCharDisplayName({_id})%" to {_p}
+
+# --- Быстро проставить себе предпочтение роли, без похода в GUI выбора. ---
+command /debugrole <text>:
+    permission: op
+    trigger:
+        set {_id} to arg-1
+        if isManiac({_id}) is true:
+            set {char.maniacPref.%player%} to {_id}
+            send "&aПредпочтение убийцы: %getCharDisplayName({_id})%. Теперь можно /startround." to player
+        else:
+            set {char.survivorPref.%player%} to {_id}
+            send "&aПредпочтение выжившего: %getCharDisplayName({_id})%. Теперь можно /startround." to player
+
+# --- Полный ресет здоровья/эффектов между тестовыми прогонами. ---
+command /debugheal:
+    permission: op
+    trigger:
+        clear the active and hidden potion effects of player
+        set max health of player to 20
+        set health of player to 20
+        send "&aПолное восстановление." to player
+
+# --- Досрочно оборвать текущий раунд, не дожидаясь конца. ---
+command /debugend:
+    permission: op
+    trigger:
+        stopRound("&7[DEBUG] Раунд остановлен вручную.")
+
+# --- Скины: то, что в обычной игре копится долго (деньги = 1.5x от XP,
+#     милстоуны = уровни персонажа), здесь выдаётся мгновенно. ---
+
+# Накинуть себе денег, не гриндя XP.
+command /debugmoney <number>:
+    permission: op
+    trigger:
+        addMoney(player, arg-1)
+        send "&a[DEBUG] +%arg-1% денег. Баланс: %getMoney(player)%." to player
+
+# Прогнать реальный unlockMilestone() для персонажа/уровня — тот же код,
+# что срабатывает от awardXP() в levels.sk, включая разлок скина
+# charid_Nm и сообщение игроку. Уровень: 25/50/75/100.
+command /debugmilestone <text> <number>:
+    permission: op
+    trigger:
+        set {_id} to arg-1
+        set {_level} to arg-2
+        if {_level} is not 25, 50, 75 or 100:
+            send "&cУровень милстоуна должен быть 25, 50, 75 или 100." to player
+            stop
+        unlockMilestone(player, {_id}, {_level})
+        send "&a[DEBUG] Милстоун %{_level}% для %{_id}% разлочен." to player
+
+# Разлочить конкретный скин напрямую по id, минуя и магазин, и уровни —
+# для скинов, которых ещё даже нет в магазине через /addshopskin.
+command /debugunlockskin <text> <text>:
+    permission: op
+    trigger:
+        set {_id} to arg-1
+        set {_skinid} to arg-2
+        unlockSkin(player, {_id}, {_skinid})
+        selectSkin(player, {_id}, {_skinid})
+        applyCharacterSkin(player, {_id})
+        send "&a[DEBUG] Скин '%{_skinid}%' для %{_id}% разлочен, выбран и надет." to player
+
+# =========================================================
+# ОГРАНИЧЕНИЕ: всё вышеперечисленное — тест "себя" (кит, скин, роль).
+# Механики, где нужны РЕАЛЬНО два живых участника одновременно (маньяк
+# бьёт выжившего, Санина турель реагирует на чужой урон и т.п.) —
+# так не протестировать, для них нужен второй аккаунт/друг на 5 минут.
+# Если понадобится — можно отдельно накинуть NPC-манекен (Citizens) как
+# неподвижную "жертву" для тестов урона/абилок, скажи, сделаю.
+# =========================================================

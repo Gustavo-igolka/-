@@ -1,0 +1,350 @@
+# =========================================================
+# dummy.sk — манекены для соло-тестов способностей.
+# Манекен — armor stand (ванильная сущность, плагины не нужны), урон по нему
+# всегда отменяется — он не умирает. Два типа:
+#   /dummy            — "выживший": цель для способностей убийц
+#   /dummy maniac     — "убийца":   цель для способностей стражей/Кирилла/Сани
+# Всё под op. Список {dummy.list::*} пуст, пока не вызовешь /dummy — тогда
+# на обычную игру файл не влияет. Раунд для тестов запускать НЕ нужно.
+#
+# Команды:
+#   /dummy [survivor|maniac] [дистанция]   поставить манекен
+#   /dummyturn                             развернуть манекены на 180° (спина/лицо для Ильи)
+#   /dummyhit                              "убийца-манекен" бьёт тебя (тест Перри Маёра)
+#   /dummyclear                            убрать все манекены
+#   /debuginfect                           заразить анвил, на который смотришь (тест телепорта Проекта)
+# =========================================================
+
+# --- Тестовый режим: пока есть хоть один манекен, "раунд" для Сани/ДенДена считается идущим. ---
+function dbgLive() :: boolean:
+    if {round.active} is true:
+        return true
+    if size of {dummy.list::*} > 0:
+        return true
+    return false
+
+function dbgAlive(p: player) :: boolean:
+    if {alive.%{_p}%} is true:
+        return true
+    if size of {dummy.list::*} > 0:
+        return true
+    return false
+
+# --- Ближайший манекен нужного типа в радиусе r от точки (или ничего). ---
+function dummyNearest(loc: location, kind: text, r: number) :: entity:
+    set {_best} to {_r}
+    delete {_found}
+    loop {dummy.list::*}:
+        if {dummy.kind.%loop-value%} is {_kind}:
+            set {_d} to distance between {_loc} and loop-value
+            if {_d} <= {_best}:
+                set {_best} to {_d}
+                set {_found} to loop-value
+    return {_found}
+
+# --- Показать состояние над манекеном на время (оглушён/ошеломлён...). ---
+function dummyStatus(e: entity, tag: text, d: timespan):
+    if {_e} is not alive:
+        stop
+    set {_base} to {dummy.name.%{_e}%}
+    set {dummy.state.%{_e}%} to now
+    set {_t} to {dummy.state.%{_e}%}
+    set name of {_e} to "%{_base}% %{_tag}%"
+    wait {_d}
+    if {dummy.state.%{_e}%} is {_t}:
+        set name of {_e} to {_base}
+
+# --- Спина/лицо: копия isBehind() из abilities.sk, но цель — сущность. ---
+function dummyIsBehind(a: player, e: entity) :: boolean:
+    set {_victimYaw} to yaw of location of {_e}
+    set {_dirVec} to vector from location of {_e} to location of {_a}
+    set {_dirYaw} to yaw of {_dirVec}
+    set {_diff} to {_dirYaw} - {_victimYaw}
+    while {_diff} > 180:
+        subtract 360 from {_diff}
+    while {_diff} < -180:
+        add 360 to {_diff}
+    if {_diff} < 0:
+        set {_diff} to {_diff} * -1
+    if {_diff} > 120:
+        return true
+    return false
+
+# =========================================================
+# Команды
+# =========================================================
+command /dummy [<text>] [<number>]:
+    permission: op
+    trigger:
+        set {_kind} to "survivor"
+        if arg-1 is "maniac" or "m" or "убийца":
+            set {_kind} to "maniac"
+        set {_dist} to 4
+        if arg-2 is set:
+            set {_dist} to arg-2
+        set {_p} to player
+        set {_yaw} to yaw of {_p}
+        set {_x} to (x-coord of {_p}) + (sin({_yaw}) * -1 * {_dist})
+        set {_z} to (z-coord of {_p}) + (cos({_yaw}) * {_dist})
+        # выживший смотрит на тебя; убийца стоит К ТЕБЕ СПИНОЙ (чтобы сразу тестить удар в спину)
+        set {_faceYaw} to {_yaw}
+        if {_kind} is "survivor":
+            set {_faceYaw} to {_yaw} + 180
+        set {_loc} to location({_x}, y-coord of {_p}, {_z}, {_p}'s world, {_faceYaw}, 0)
+        spawn an armor stand at {_loc}
+        set {_e} to last spawned entity
+        set {_color} to green
+        set {_label} to "&a&lМанекен (выживший)"
+        if {_kind} is "maniac":
+            set {_color} to red
+            set {_label} to "&c&lМанекен (убийца)"
+        set {_h} to leather helmet
+        dye {_h} {_color}
+        set helmet of {_e} to {_h}
+        set {_c} to leather chestplate
+        dye {_c} {_color}
+        set chestplate of {_e} to {_c}
+        set name of {_e} to {_label}
+        set {dummy.name.%{_e}%} to {_label}
+        set {dummy.kind.%{_e}%} to {_kind}
+        add {_e} to {dummy.list::*}
+        set {dummy.owner} to {_p}
+        send "&a[DUMMY] Поставлен манекен: %{_kind}% (%{_dist}% бл.). Всего: %size of {dummy.list::*}%." to {_p}
+
+command /dummyturn:
+    permission: op
+    trigger:
+        loop {dummy.list::*}:
+            set {_e} to loop-value
+            set {_l} to location of {_e}
+            teleport {_e} to location(x-coord of {_l}, y-coord of {_l}, z-coord of {_l}, {_l}'s world, (yaw of {_l}) + 180, 0)
+        send "&7[DUMMY] Манекены развёрнуты на 180°." to player
+
+command /dummyclear:
+    permission: op
+    trigger:
+        loop {dummy.list::*}:
+            set {_e} to loop-value
+            kill {_e}
+        delete {dummy.list::*}
+        send "&7[DUMMY] Все манекены убраны." to player
+
+# --- Заразить анвил, на который смотришь: так можно тестить телепорт Проекта
+#     без раунда (в раунде заражает ПКМ по анвилу). ---
+command /debuginfect:
+    permission: op
+    trigger:
+        set {_b} to target block
+        if {_b} is not anvil:
+            send "&c[DEBUG] Смотри на анвил (наковальню)." to player
+            stop
+        projectInfectGenerator(player, location of {_b})
+        send "&a[DEBUG] Заражено генераторов: %size of {project.infectedGens::*}%." to player
+
+# --- "Убийца-манекен" бьёт тебя: тест Перри Маёра (в игре Перри ловит удар
+#     каменного меча убийцы). Логика успеха — копия из abilities.sk. ---
+command /dummyhit:
+    permission: op
+    trigger:
+        if {char.%player%} is not "mayor":
+            send "&c[DUMMY] Нужен персонаж mayor (/debugchar mayor)." to player
+            stop
+        if {mayor.parrying.%player%} is not true:
+            send "&7[DUMMY] Удар прошёл — Перри не активно (нажми Перри и сразу /dummyhit)." to player
+            stop
+        if {mayor.parrySuccess.%player%} is true:
+            send "&7[DUMMY] Парирование уже сработало в этом окне." to player
+            stop
+        set {mayor.parrySuccess.%player%} to true
+        set {mayor.power.%player%} to true
+        grantMayorAbsorption(player)
+        delete {cd.mayor_strike.%player%}
+        send "&a&l[DUMMY] Парирование удалось! Удар готов, Сверхудар активен 2 сек." to player
+        wait 2 seconds
+        delete {mayor.power.%player%}
+
+# =========================================================
+# Эффекты способностей на манекене — ВСЕ удары по манекену идут сюда.
+# =========================================================
+on damage of armor stand:
+    if {dummy.kind.%victim%} is set:
+        cancel event
+        set {_e} to victim
+        set {_kind} to {dummy.kind.%victim%}
+        set {_dmg} to damage
+        if attacker is a player:
+            set {_a} to attacker
+            if {_kind} is "survivor":
+                dummyHitSurvivor({_a}, {_e}, {_dmg})
+            else:
+                dummyHitManiac({_a}, {_e})
+        else if attacker is a zombie:
+            send "&5[DUMMY] Зомби Некроманта ударил манекен. Урон: %{_dmg}%." to {dummy.owner}
+        else if attacker is a creeper:
+            send "&c[DUMMY] Крипер взорвался у манекена. Урон: %{_dmg}%." to {dummy.owner}
+
+# --- Манекен-ВЫЖИВШИЙ получает удар убийцы (каменный меч) ---
+function dummyHitSurvivor(a: player, e: entity, dmg: number):
+    if isManiac({char.%{_a}%}) is false:
+        send "&7[DUMMY] Это манекен-выживший: бей убийцей (/debugchar project|denden|...)." to {_a}
+        stop
+    if {_a}'s tool is not stone sword:
+        stop
+    if {stunned.%{_a}%} is true:
+        send "&c[DUMMY] Ты оглушён — удар не засчитан." to {_a}
+        stop
+    if {staggered.%{_a}%} is true:
+        send "&e[DUMMY] Ты ошеломлён — удар не засчитан." to {_a}
+        stop
+    if {anomaly.stalking.%{_a}%} is true:
+        send "&c[DUMMY] Ты в тени — удар не засчитан." to {_a}
+        stop
+    if tryCooldown({_a}, "maniac_melee", 5) is true:
+        resetBloodlust({_a})
+        send "&4[DUMMY] Удар убийцы попал по манекену. Урон: %{_dmg}%. Откат 5 сек." to {_a}
+
+# --- Манекен-УБИЙЦА получает удар стража ---
+function dummyHitManiac(a: player, e: entity):
+    # --- Михуилонг: Меч оглушения ---
+    if name of {_a}'s tool is "&9Меч оглушения":
+        if {char.%{_a}%} is "mihuilong":
+            if tryCooldown({_a}, "mihu_stun", 40) is true:
+                set {_d} to getGuardStunDuration("mihuilong")
+                send "&9[DUMMY] Стан Михуилонга: манекен оглушён на %{_d}%." to {_a}
+                apply slowness 2 to {_a} for 2 seconds
+                dummyStatus({_e}, "&5[ОГЛУШЁН]", {_d})
+        stop
+    # --- Илья: Деревянный клинок (Краска -> рывок+стан / спина -> стан / лицо -> замедление) ---
+    if {char.%{_a}%} is "ilya":
+        if {_a}'s tool is wooden sword:
+            if tryCooldown({_a}, "ilya_blade", 30) is true:
+                set {_d} to getGuardStunDuration("ilya")
+                if {ilya_buffed.%{_a}%} is true:
+                    push {_a} in direction of {_a} at speed 1.5
+                    send "&a[DUMMY] Илья: Рывок (Краска)! Манекен оглушён на %{_d}%." to {_a}
+                    dummyStatus({_e}, "&5[ОГЛУШЁН]", {_d})
+                else if dummyIsBehind({_a}, {_e}) is true:
+                    send "&a[DUMMY] Илья: удар в спину! Манекен оглушён на %{_d}%." to {_a}
+                    dummyStatus({_e}, "&5[ОГЛУШЁН]", {_d})
+                else:
+                    apply slowness 1 to {_e} for 5 seconds
+                    send "&b[DUMMY] Илья: удар в лицо — только замедление 5 сек + ошеломление 4 сек." to {_a}
+                    dummyStatus({_e}, "&e[ОШЕЛОМЛЁН]", 4 seconds)
+        stop
+    # --- Маёр: Пинок / Удар (со Сверхударом после парирования = стан) ---
+    if {char.%{_a}%} is "mayor":
+        if name of {_a}'s tool is "&6Пинок":
+            if tryCooldown({_a}, "mayor_kick", 45) is true:
+                push {_e} away from {_a} with speed 3
+                send "&6[DUMMY] Маёр: Пинок! Манекен отброшен и ошеломлён на 4 сек." to {_a}
+                dummyStatus({_e}, "&e[ОШЕЛОМЛЁН]", 4 seconds)
+        else if name of {_a}'s tool is "&7Удар":
+            if tryCooldown({_a}, "mayor_strike", 60) is true:
+                if {mayor.power.%{_a}%} is true:
+                    set {_d} to getGuardStunDuration("mayor")
+                    push {_e} away from {_a} with speed 3
+                    send "&6&l[DUMMY] Маёр: Сверхудар! Манекен оглушён на %{_d}%." to {_a}
+                    dummyStatus({_e}, "&5[ОГЛУШЁН]", {_d})
+                else:
+                    apply slowness 1 to {_e} for 3 seconds
+                    push {_e} away from {_a} with speed 1.2
+                    send "&7[DUMMY] Маёр: Удар — замедление 3 сек + ошеломление 3 сек." to {_a}
+                    dummyStatus({_e}, "&e[ОШЕЛОМЛЁН]", 3 seconds)
+        stop
+
+# --- Кирилл: столкновение рывка с манекеном-убийцей (вызывается из kirillPerformDash) ---
+function dummyKirillCollision(p: player, d: entity, mode: text):
+    if {_mode} is "bumper":
+        push {_d} away from {_p} with speed 3.2
+        send "&6[DUMMY] Бампер! Манекен отброшен." to {_p}
+        chargeKirillCell({_p})
+        kirillStartModeRecharge({_p})
+    else if {_mode} is "ghost":
+        apply speed 3 to {_p} for 5 seconds
+        send "&b[DUMMY] Призрак! Получена скорость 3 на 5 сек." to {_p}
+        chargeKirillCell({_p})
+        kirillStartModeRecharge({_p})
+    else:
+        send "&7[DUMMY] Столкновение с манекеном-убийцей (режим %{_mode}%)." to {_p}
+
+# --- Проект: попадание Хакер раша по манекену-выжившему (вызывается из projectPerformRush) ---
+function dummyRushOnHit(p: player, d: entity):
+    if {dummy.dashStack.%{_d}%} is true:
+        set {dummy.dashStack.%{_d}%} to false
+        set {project.rushReadyAt.%{_p}%} to now + 50 seconds
+        send "&4&l[DUMMY] Стак пробит! Урон 3, стак снят, откат обычный (50 сек), тебе замедление на 4 сек." to {_p}
+        projectSlowWalk({_p}, 0.11, 4 seconds)
+    else:
+        set {dummy.dashStack.%{_d}%} to true
+        apply glowing to {_d} for 10 seconds
+        set {project.rushReadyAt.%{_p}%} to now + 2 seconds
+        send "&4[DUMMY] Рывок зацепил манекен: стак на 10 сек, откат ускорен до 2 сек." to {_p}
+        wait 10 seconds
+        set {dummy.dashStack.%{_d}%} to false
+
+# =========================================================
+# Периодические проверки (работают БЕЗ {round.active})
+# =========================================================
+every 1 second:
+    if size of {dummy.list::*} > 0:
+        # --- Челюсти Проекта: один удар на каст, радиус 1.3 ---
+        if {round.active} is not true:
+            loop {project.jawPoints::*}:
+                set {_l} to loop-value
+                if {project.jawBorn.%{_l}%} is not set:
+                    remove {_l} from {project.jawPoints::*}
+                else if difference between {project.jawBorn.%{_l}%} and now > 14 seconds:
+                    delete {project.jawBorn.%{_l}%}
+                    remove {_l} from {project.jawPoints::*}
+        if {project.jawHitDone} is not true:
+            loop {project.jawPoints::*}:
+                set {_l} to loop-value
+                set {_m} to dummyNearest({_l}, "survivor", 1.3)
+                if {_m} is set:
+                    set {project.jawHitDone} to true
+                    send "&4&l[DUMMY] Челюсти сомкнулись на манекене! Урон 3." to {dummy.owner}
+        # --- Крюк/Крипер ДенДена и зомби Некроманта: манекен-выживший как цель ---
+        loop {denden.creepers::*}:
+            set {_c} to loop-value
+            if {_c} is not alive:
+                remove {_c} from {denden.creepers::*}
+            else:
+                if {round.active} is not true:
+                    if {denden.creeperBorn.%{_c}%} is set:
+                        if difference between {denden.creeperBorn.%{_c}%} and now > 20 seconds:
+                            delete {denden.creeperBorn.%{_c}%}
+                            remove {_c} from {denden.creepers::*}
+                            kill {_c}
+                set {_m} to dummyNearest(location of {_c}, "survivor", 30)
+                if {_m} is set:
+                    set target of {_c} to {_m}
+                    if distance between {_c} and {_m} < 3:
+                        push {_m} away from {_c} with speed 1.2
+                        send "&c[DUMMY] Крипер ДенДена достал манекен: урон 4 + отброс." to {dummy.owner}
+                        delete {denden.creeperBorn.%{_c}%}
+                        remove {_c} from {denden.creepers::*}
+                        kill {_c}
+        loop {necro.activeZombies::*}:
+            set {_z} to loop-value
+            if {_z} is alive:
+                set {_m} to dummyNearest(location of {_z}, "survivor", 20)
+                if {_m} is set:
+                    set target of {_z} to {_m}
+        # --- Капкан Аномалии: манекен-выживший в радиусе 1.2 ---
+        set {_o} to {dummy.owner}
+        if {_o} is set:
+            loop {anomaly.traps.%{_o}%::*}:
+                set {_idx} to loop-index
+                set {_tl} to loop-value
+                set {_m} to dummyNearest({_tl}, "survivor", anomalyTrapRadius())
+                if {_m} is set:
+                    apply slowness 4 to {_m} for 4 seconds
+                    apply speed 1 to {_o} for 7 seconds
+                    send "&c[DUMMY] Капкан сработал на манекене: урон 5, замедление 4 на 4 сек." to {_o}
+                    delete {anomaly.traps.%{_o}%::%{_idx}%}
+
+# --- Чистка списка от убитых/удалённых манекенов ---
+every 5 seconds:
+    loop {dummy.list::*}:
+        if loop-value is not alive:
+            remove loop-value from {dummy.list::*}

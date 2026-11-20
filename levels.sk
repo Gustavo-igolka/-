@@ -1,0 +1,222 @@
+# =========================================================
+# levels.sk — уровни/опыт за персонажа + система злости.
+#
+# XP и злость — ДВЕ НЕЗАВИСИМЫЕ системы, никак друг с другом не связаны:
+#   - awardXP(игрок, id_персонажа, число) — копится ПО ПЕРСОНАЖУ,
+#     дальше это "понты": уровни и памятная фейк-броня на 25/50/75/100.
+#     Начисляется способностям выживших И убийц.
+#   - addAnger(игрок, число) — копится НА ИГРОКА (общая для всех
+#     персонажей), начисляется только выжившим, у убийц всегда 0.
+#     У кого больше всего злости на момент /startround — тот убийца,
+#     после чего его злость обнуляется.
+# Оба вызываются из способностей (abilities.sk), генераторов
+# (generators.sk) и round.sk — этот файл только даёт им "мозги".
+#
+# Стоимость уровня N: 50 + 10*(N-1). Пример: 1 ур = 50, 2 ур = 60,
+# 50 ур = 540.
+#
+# Деньги (см. секцию "ДЕНЬГИ" ниже) начисляются автоматически вместе
+# с опытом — 1.5x от суммы XP, за оба источника (способности, генераторы)
+# одним хуком в awardXP(), после умножения на буст x2, если он активен.
+#
+# На уровнях 25/50/75/100 персонаж БЕСПЛАТНО разлочивает альт-скин
+# "charid_1m"/"_2m"/"_3m"/"_4m" (см. skins.sk) — раньше тут была памятная броня, теперь
+# вместо неё скин, который выбирается как обычный через /skins. В
+# магазине такие скины не продаются — только через уровни.
+# =========================================================
+
+function expCostForLevel(level: number) :: number:
+    return 50 + (10 * ({_level} - 1))
+
+# Возвращает текущий уровень персонажа игрока, 0 если ещё не играл им
+function getCharLevel(p: player, charid: text) :: number:
+    if {playerLevel.%{_p}%.%{_charid}%} is set:
+        return {playerLevel.%{_p}%.%{_charid}%}
+    else:
+        return 0
+
+function awardXP(p: player, charid: text, amount: number):
+    if {_charid} is not set:
+        stop
+
+    # Буст опыта x2 (/bustxp) — множится ЗДЕСЬ, один раз, поэтому
+    # действует одинаково на все источники опыта (способности, генераторы,
+    # ЛМС и т.д.) без правок в каждом из них по отдельности.
+    if {xpBoost.active} is true:
+        set {_amount} to {_amount} * 2
+
+    # --- Деньги: 1.5x от начисленного опыта (после буста, если он активен) ---
+    addMoney({_p}, round({_amount} * 1.5))
+
+    # --- Опыт персонажа ---
+    add {_amount} to {playerExp.%{_p}%.%{_charid}%}
+    set {_nextLevel} to getCharLevel({_p}, {_charid}) + 1
+    set {_cost} to expCostForLevel({_nextLevel})
+
+    while {playerExp.%{_p}%.%{_charid}%} >= {_cost}:
+        remove {_cost} from {playerExp.%{_p}%.%{_charid}%}
+        add 1 to {playerLevel.%{_p}%.%{_charid}%}
+        send "&6&l▲ %{_charid}% достиг уровня %getCharLevel({_p}, {_charid})%!" to {_p}
+        unlockMilestone({_p}, {_charid}, getCharLevel({_p}, {_charid}))
+        set {_nextLevel} to getCharLevel({_p}, {_charid}) + 1
+        set {_cost} to expCostForLevel({_nextLevel})
+
+# Тумблер буста опыта x2 — влияет на awardXP() глобально, для всех
+# персонажей и источников опыта разом.
+command /bustxp:
+    permission: op
+    trigger:
+        if {xpBoost.active} is not set:
+            set {xpBoost.active} to false
+        if {xpBoost.active} is true:
+            set {xpBoost.active} to false
+            broadcast "&cБуст опыта x2 выключен."
+        else:
+            set {xpBoost.active} to true
+            broadcast "&a&l✦ Буст опыта x2 включён! Весь получаемый опыт удваивается."
+
+# Злость — общая для игрока (не для персонажа), решает кто станет убийцей.
+# У убийц во время раунда никогда не растёт.
+function addAnger(p: player, amount: number):
+    if {anger.%{_p}%} is not set:
+        set {anger.%{_p}%} to 0
+    add {_amount} to {anger.%{_p}%}
+
+# Разлок милстоуна на уровнях 25/50/75/100. ВАЖНО: привязан к КОНКРЕТНОМУ
+# персонажу (milestone.%p%.%charid%), а не общий на всех — не путать с уровнем
+# самого персонажа (playerLevel), это две разные переменные, но обе всегда
+# индексируются через .%charid%. {milestone.%p%.%charid%} хранит наивысший
+# открытый уровень — используется и для hasMaxMilestone(), и как источник
+# правды "какие уровни точно разлочены" (сам скин физически разлочивается
+# отдельным вызовом unlockSkin() в skins.sk).
+function unlockMilestone(p: player, charid: text, level: number):
+    if {_level} is 25 or 50 or 75 or 100:
+        set {milestone.%{_p}%.%{_charid}%} to {_level}
+        set {_skinid} to milestoneSkinId({_charid}, {_level})
+        unlockSkin({_p}, {_charid}, {_skinid})
+        send "&e&l★ Открыт скин %{_level}% ур. для %{_charid}%! Выбери его через /skins." to {_p}
+
+# 4-й (последний) милстоун — 100 уровень. Нужна отдельно для big_game ЛМС
+# (round.sk): срабатывает, когда и убийца, и выживший в дуэли на своём
+# персонаже уже открыли этот сет.
+function hasMaxMilestone(p: player, charid: text) :: boolean:
+    if {milestone.%{_p}%.%{_charid}%} is 100:
+        return true
+    return false
+
+# Меню со всеми персонажами игрока и их уровнями
+command /levels:
+    trigger:
+        set {_inv} to a new chest inventory with 3 rows named "&5Твои уровни"
+        # --- Убийцы (1-й ряд) ---
+        set slot 0 of {_inv} to stone sword named "&cДэнДэн &7(Ур. %getCharLevel(player, "denden")%)"
+        set slot 1 of {_inv} to bow named "&5Некромансик &7(Ур. %getCharLevel(player, "necromancer")%)"
+        set slot 2 of {_inv} to trident named "&cАномалия &7(Ур. %getCharLevel(player, "anomaly")%)"
+        set slot 3 of {_inv} to iron axe named "&8The Project &7(Ур. %getCharLevel(player, "project")%)"
+        set slot 4 of {_inv} to fermented spider eye named "&2Незрячий &7(Ур. %getCharLevel(player, "blind")%)"
+        # --- Выжившие (2-й ряд) — Рашеры → Стражи → Поддержка, тот же порядок, что и в GUI выбора ---
+        set slot 9 of {_inv} to bow named "&aАндрей &7(Ур. %getCharLevel(player, "andrey")%)"
+        set slot 10 of {_inv} to clock named "&bРататуй &7(Ур. %getCharLevel(player, "hacker")%)"
+        set slot 11 of {_inv} to leather named "&aКирилл &7(Ур. %getCharLevel(player, "kirill")%)"
+        set slot 12 of {_inv} to iron sword named "&9Михуилонг &7(Ур. %getCharLevel(player, "mihuilong")%)"
+        set slot 13 of {_inv} to wooden sword named "&fИлья &7(Ур. %getCharLevel(player, "ilya")%)"
+        set slot 14 of {_inv} to golden sword named "&7Маёр &7(Ур. %getCharLevel(player, "mayor")%)"
+        set slot 15 of {_inv} to crossbow named "&6Dartikil &7(Ур. %getCharLevel(player, "dartikil")%)"
+        set slot 16 of {_inv} to sugar named "&dМякШмяка &7(Ур. %getCharLevel(player, "alexey")%)"
+        set slot 17 of {_inv} to bow named "&bТомас &7(Ур. %getCharLevel(player, "thomas")%)"
+        set slot 18 of {_inv} to iron nugget named "&2Саня &7(Ур. %getCharLevel(player, "sanya")%)"
+        set {levelsmenu.inv.%player%} to {_inv}
+        open {_inv} to player
+
+# Это чисто информационное меню — предметы из него нельзя забирать
+# (раньше клики не отменялись, из-за чего иконки уровней можно было
+# вытащить прямо в инвентарь).
+on inventory click:
+    if {levelsmenu.inv.%player%} is set:
+        if event-inventory is {levelsmenu.inv.%player%}:
+            cancel event
+
+on inventory close:
+    if {levelsmenu.inv.%player%} is set:
+        if event-inventory is {levelsmenu.inv.%player%}:
+            delete {levelsmenu.inv.%player%}
+
+# Злость — открытая информация, не секрет. Показываем список всех, у кого она есть,
+# отсортированный по убыванию (кто злее — тот выше, у него больше шанс стать убийцей).
+command /anger:
+    trigger:
+        send "&c&l— Злость игроков —" to player
+        set {_shown} to 0
+        loop all players:
+            if {anger.%loop-player%} is set:
+                add 1 to {_shown}
+        if {_shown} is 0:
+            send "&7Пока ни у кого нет злости." to player
+            stop
+        delete {_names::*}
+        delete {_vals::*}
+        loop all players:
+            if {anger.%loop-player%} is set:
+                add "%loop-player%" to {_names::*}
+                add {anger.%loop-player%} to {_vals::*}
+        # --- Простая сортировка по убыванию (игроков мало, пузырьком — нормально) ---
+        loop size of {_names::*} times:
+            loop (size of {_names::*} - 1) times:
+                if {_vals::%loop-number-2%} < {_vals::%loop-number-2 + 1%}:
+                    set {_tn} to {_names::%loop-number-2%}
+                    set {_tv} to {_vals::%loop-number-2%}
+                    set {_names::%loop-number-2%} to {_names::%loop-number-2 + 1%}
+                    set {_vals::%loop-number-2%} to {_vals::%loop-number-2 + 1%}
+                    set {_names::%loop-number-2 + 1%} to {_tn}
+                    set {_vals::%loop-number-2 + 1%} to {_tv}
+        # --- Вывод результатов в чат ---
+        loop {_names::*}:
+            send "&7%loop-value%: &c%{_vals::%loop-index%}%" to player
+
+
+# =========================================================
+# ДЕНЬГИ — общая валюта на игрока (НЕ на персонажа, в отличие от XP).
+# Механика начисления пока не подключена ни к чему — задел на будущее.
+# =========================================================
+function addMoney(p: player, amount: number):
+    if {money.%{_p}%} is not set:
+        set {money.%{_p}%} to 0
+    add {_amount} to {money.%{_p}%}
+
+function getMoney(p: player) :: number:
+    if {money.%{_p}%} is set:
+        return {money.%{_p}%}
+    return 0
+
+command /money:
+    trigger:
+        send "&6Твой баланс: &e%getMoney(player)%" to player
+
+# =========================================================
+# СТАТИСТИКА — счётчик побед по сторонам за всё время сервера.
+# Ручная остановка (/endround) победой не считается ни для кого.
+# =========================================================
+function addStatWin(side: text):
+    if {_side} is "survivor":
+        if {stats.survivorWins} is not set:
+            set {stats.survivorWins} to 0
+        add 1 to {stats.survivorWins}
+    else if {_side} is "maniac":
+        if {stats.maniacWins} is not set:
+            set {stats.maniacWins} to 0
+        add 1 to {stats.maniacWins}
+
+command /stats:
+    trigger:
+        set {_sw} to 0
+        set {_mw} to 0
+        if {stats.survivorWins} is set:
+            set {_sw} to {stats.survivorWins}
+        if {stats.maniacWins} is set:
+            set {_mw} to {stats.maniacWins}
+        set {_total} to {_sw} + {_mw}
+        send "&e&l— Статистика раундов —" to player
+        send "&a✔ Победы выживших: &f%{_sw}%" to player
+        send "&4✔ Победы убийц: &f%{_mw}%" to player
+        if {_total} > 0:
+            send "&7Всего раундов: &f%{_total}%" to player

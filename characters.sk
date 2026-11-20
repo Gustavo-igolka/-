@@ -1,0 +1,310 @@
+# =========================================================
+# characters.sk — выбор персонажа, раздельно по ролям.
+#
+# GUI выбора собраны в функции openManiacChoiceMenu()/openSurvivorChoiceMenu(),
+# их дёргают И команды /choosemaniac, /choosesurvivor, И лобби-предметы
+# (компас/незеритовая звезда) из lobbyitems.sk — один и тот же код, два входа.
+# =========================================================
+
+# Красивое отображаемое имя персонажа для сообщений в чат — id остаются
+# прежними (denden/hacker/alexey и т.д.), меняется только то, что видит игрок
+function getCharDisplayName(charid: text) :: text:
+    if {_charid} is "denden":
+        return "ДэнДэн"
+    else if {_charid} is "necromancer":
+        return "Некромансик"
+    else if {_charid} is "anomaly":
+        return "The Anomaly"
+    else if {_charid} is "andrey":
+        return "Андрей"
+    else if {_charid} is "mihuilong":
+        return "Михуилонг"
+    else if {_charid} is "alexey":
+        return "МякШмяка"
+    else if {_charid} is "ilya":
+        return "Илья"
+    else if {_charid} is "hacker":
+        return "Рататуй"
+    else if {_charid} is "thomas":
+        return "Томас"
+    else if {_charid} is "mayor":
+        return "Маёр"
+    else if {_charid} is "sanya":
+        return "Саня"
+    else if {_charid} is "kirill":
+        return "Кирилл"
+    else if {_charid} is "dartikil":
+        return "Dartikil"
+    else if {_charid} is "project":
+        return "The Project"
+    else if {_charid} is "blind":
+        return "Незрячий"
+    else:
+        return {_charid}
+
+function openManiacChoiceMenu(p: player):
+    set {_inv} to a new chest inventory with 1 row named "&4Убийца (предпочтение)"
+    set slot 3 of {_inv} to stone sword named "&cДэнДэн"
+    set slot 5 of {_inv} to bow named "&5Некромансик"
+    set slot 7 of {_inv} to trident named "&cАномалия"
+    set slot 1 of {_inv} to iron axe named "&8The Project"
+    set slot 4 of {_inv} to fermented spider eye named "&2Незрячий"
+    set {choose.inv.%{_p}%} to {_inv}
+    set {choose.role.%{_p}%} to "maniac"
+    open {_inv} to {_p}
+
+function openSurvivorChoiceMenu(p: player):
+    set {_inv} to a new chest inventory with 2 rows named "&aВыживший (предпочтение)"
+    # --- Рашеры ---
+    set slot 0 of {_inv} to bow named "&aАндрей"
+    set slot 1 of {_inv} to clock named "&bРататуй"
+    set slot 2 of {_inv} to leather named "&aКирилл"
+    # --- Стражи ---
+    set slot 3 of {_inv} to iron sword named "&9Михуилонг"
+    set slot 4 of {_inv} to wooden sword named "&fИлья"
+    set slot 5 of {_inv} to golden sword named "&7Маёр"
+    set slot 12 of {_inv} to crossbow named "&6Dartikil"
+    # --- Поддержка ---
+    set slot 7 of {_inv} to sugar named "&dМякШмяка"
+    set slot 8 of {_inv} to bow named "&bТомас"
+    set slot 6 of {_inv} to iron nugget named "&2Саня"
+    set {choose.inv.%{_p}%} to {_inv}
+    set {choose.role.%{_p}%} to "survivor"
+    open {_inv} to {_p}
+
+command /choosemaniac:
+    trigger:
+        openManiacChoiceMenu(player)
+
+command /choosesurvivor:
+    trigger:
+        openSurvivorChoiceMenu(player)
+
+on inventory click:
+    if {choose.inv.%player%} is set:
+        if event-inventory is {choose.inv.%player%}:
+            cancel event
+            if {choose.role.%player%} is "maniac":
+                if clicked slot is 3:
+                    set {char.maniacPref.%player%} to "denden"
+                else if clicked slot is 5:
+                    set {char.maniacPref.%player%} to "necromancer"
+                else if clicked slot is 7:
+                    set {char.maniacPref.%player%} to "anomaly"
+                else if clicked slot is 1:
+                    set {char.maniacPref.%player%} to "project"
+                else if clicked slot is 4:
+                    set {char.maniacPref.%player%} to "blind"
+                else:
+                    stop
+                close player's inventory
+                send "&aПредпочтение убийцы сохранено: %getCharDisplayName({char.maniacPref.%player%})%. Персонаж будет выдан при старте раунда." to player
+                stop
+            else if {choose.role.%player%} is "survivor":
+                if clicked slot is 0:
+                    set {char.survivorPref.%player%} to "andrey"
+                else if clicked slot is 1:
+                    set {char.survivorPref.%player%} to "hacker"
+                else if clicked slot is 2:
+                    set {char.survivorPref.%player%} to "kirill"
+                else if clicked slot is 3:
+                    set {char.survivorPref.%player%} to "mihuilong"
+                else if clicked slot is 4:
+                    set {char.survivorPref.%player%} to "ilya"
+                else if clicked slot is 5:
+                    set {char.survivorPref.%player%} to "mayor"
+                else if clicked slot is 7:
+                    set {char.survivorPref.%player%} to "alexey"
+                else if clicked slot is 8:
+                    set {char.survivorPref.%player%} to "thomas"
+                else if clicked slot is 6:
+                    set {char.survivorPref.%player%} to "sanya"
+                else if clicked slot is 12:
+                    set {char.survivorPref.%player%} to "dartikil"
+                else:
+                    stop
+                close player's inventory
+                send "&aПредпочтение выжившего сохранено: %getCharDisplayName({char.survivorPref.%player%})%. Персонаж будет выдан при старте раунда." to player
+            else:
+                stop
+
+# --- Функции выдачи стартового набора ---
+function give_denden_kit(p: player):
+    clear inventory of {_p}
+    give stone sword to {_p}
+    give fishing rod named "&cКрюк" to {_p}
+    give gunpowder named "&cВзрывная месть" to {_p}
+    give sugar named "&bЗелье скорости" to {_p}
+
+function give_necromancer_kit(p: player):
+    clear inventory of {_p}
+    give stone sword to {_p}
+    give rotten flesh named "&5Зомби" to {_p}
+    give blaze rod named "&5Магический лук" to {_p}
+    give feather named "&5Дыхание" to {_p}
+    set {necro.zombies.%{_p}%} to 6
+
+function give_anomaly_kit(p: player):
+    clear inventory of {_p}
+    delete {anomaly.traps.%{_p}%::*}
+    delete {anomaly.stalking.%{_p}%}
+    give stone sword to {_p}
+    give stick named "&cНе ожидал?" to {_p}
+    give phantom membrane named "&5Сталк" to {_p}
+    give tripwire hook named "&cКапкан" to {_p}
+
+function give_blind_kit(p: player):
+    clear inventory of {_p}
+    sporeClear({_p})
+    delete {blind.trail::*}
+    give stone sword to {_p}
+    give green dye named "&2Споровая завеса" to {_p}
+    give fermented spider eye named "&cСлепая ярость" to {_p}
+    give slime ball named "&aПрорастание" to {_p}
+
+function give_andrey_kit(p: player):
+    clear inventory of {_p}
+    give potion named "&aЗелье скорости" to {_p}
+    give potion named "&eЗелье стойкости" to {_p}
+    give potion named "&fЗелье невидимости" to {_p}
+
+function give_mihuilong_kit(p: player):
+    clear inventory of {_p}
+    give iron sword named "&9Меч оглушения" to {_p}
+    give potion named "&aЗелье исцеления" to {_p}
+    set {mihuilong.heals.%{_p}%} to 2
+
+function give_alexey_kit(p: player):
+    clear inventory of {_p}
+    give splash potion named "&dЗелье исцеления" to {_p}
+    give sugar named "&5Рывок" to {_p}
+
+function give_ilya_kit(p: player):
+    clear inventory of {_p}
+    give wooden sword named "&fДеревянный клинок" to {_p}
+    give gray dye named "&fКраска" to {_p}
+    give ghast tear named "&aВозрождение" to {_p}
+    set max health of {_p} to 8
+    wait 1 tick
+    set health of {_p} to 8
+    set {ilya.mark.%{_p}%} to nothing
+    set {ilya.markUsed.%{_p}%} to false
+    set {ilya.reviveUsed.%{_p}%} to false
+    set {ilya_stunCount.%{_p}%} to 0
+    set {ilya_charged.%{_p}%} to false
+
+function give_hacker_kit(p: player):
+    clear inventory of {_p}
+    give clock named "&bМетка телепорта" to {_p}
+    give chorus fruit named "&bТелепорт" to {_p}
+    give redstone named "&bСила" to {_p}
+    set {hacker.mark.%{_p}%} to nothing
+
+function give_thomas_kit(p: player):
+    clear inventory of {_p}
+    give bow named "&bЛук: Скорость" to {_p}
+    give bow named "&bЛук: Замедление" to {_p}
+    give bow named "&bЛук: Стойкость" to {_p}
+    set max health of {_p} to 9
+    wait 1 tick
+    set health of {_p} to 9
+
+# Маёр (Страж) — 11 сердец = 22 HP. Perry/Пинок/Удар — три раздельных предмета
+# без ванильной механики (paper, golden sword, iron sword), см. abilities.sk.
+function give_mayor_kit(p: player):
+    clear inventory of {_p}
+    give paper named "&fПерри" to {_p}
+    give golden sword named "&6Пинок" to {_p}
+    give iron sword named "&7Удар" to {_p}
+    set max health of {_p} to 11
+    wait 1 tick
+    set health of {_p} to 11
+    delete {mayor.parrying.%{_p}%}
+    delete {mayor.parrySuccess.%{_p}%}
+    delete {mayor.power.%{_p}%}
+
+# Саня (Поддержка) — 9 сердец. Турель (замедление в зоне) и Раздатчик (хил в
+# зоне) — заспавненные армор-стенды, ломаются с одного удара МАНЬЯКА (см.
+# abilities.sk: destroySanyaStructures + защита от survivor-урона).
+function give_sanya_kit(p: player):
+    clear inventory of {_p}
+    give iron nugget named "&cТурель" to {_p}
+    give gold nugget named "&aРаздатчик" to {_p}
+    set max health of {_p} to 9
+    wait 1 tick
+    set health of {_p} to 9
+    destroySanyaStructures({_p})
+
+# Кирилл (Рашер) — обычные 10 сердец. Вор/Глич/Имплант, см. abilities.sk.
+# Шкала ячеек стартует на 6/10, режим Глича по умолчанию "Бампер" и сразу заряжен.
+function give_kirill_kit(p: player):
+    clear inventory of {_p}
+    give leather named "&aВор" to {_p}
+    give prismarine shard named "&bГлич" to {_p}
+    give netherite scrap named "&cИмплант" to {_p}
+    set {kirill.cells.%{_p}%} to 6
+    set {kirill.mode.%{_p}%} to "bumper"
+    set {kirill.modeCharged.%{_p}%} to true
+    delete {kirill.dashHit.%{_p}%}
+    delete {kirill.implantActive.%{_p}%}
+    delete {kirill.implantHealing.%{_p}%}
+
+# Dartikil (Страж) — хп на старте случайно 6–9 сердец. Монета/Пистолет/Знак/Шляпа и
+# пассивка «Заряды» — см. abilities.sk. Все счётчики сбрасываются при выдаче кита.
+function give_dartikil_kit(p: player):
+    clear inventory of {_p}
+    give raw gold named "&6Монета" to {_p}
+    give crossbow named "&cПистолет" to {_p}
+    give oak sign named "&eЗнак" to {_p}
+    give leather helmet named "&8Шляпа" to {_p}
+    set {dart.charges.%{_p}%} to 0
+    delete {dart.slowLevel.%{_p}%}
+    delete {dart.slowToken.%{_p}%}
+    delete {dart.pistolBroken.%{_p}%}
+    set {_hp} to a random integer between 6 and 9
+    set max health of {_p} to {_hp}
+    wait 1 tick
+    set health of {_p} to {_hp}
+
+# The Project (Убийца) — обычные 10 сердец (урон по нему всё равно
+# заблокирован в abilities.sk). Челюсти/Хакер раш/Телепорт — см. abilities.sk.
+# Пассивка "вечное замедление 1" накладывается отдельно в round.sk при
+# телепорте на точку спавна убийцы (список сброса — там же).
+function give_project_kit(p: player):
+    clear inventory of {_p}
+    give stone sword to {_p}
+    give bone named "&4Челюсти" to {_p}
+    give feather named "&4Хакер раш" to {_p}
+    give recovery compass named "&4Телепорт к генератору" to {_p}
+    set {project.infectedCount} to 0
+    delete {project.infectedGens::*}
+    delete {project.jawPoints::*}
+    delete {project.jawHitDone}
+
+# --- Диспетчер: выдать стартовый кит выжившего по id персонажа.
+#     Нужен местам вне обычного /startround, которые выдают кит по
+#     произвольному id — например, Батл Роялю в event.sk, где каждый
+#     игрок теперь получает СВОЙ выбранный персонаж, а не всегда Михуилонга. ---
+function giveSurvivorKit(p: player, charid: text):
+    if {_charid} is "andrey":
+        give_andrey_kit({_p})
+    else if {_charid} is "mihuilong":
+        give_mihuilong_kit({_p})
+    else if {_charid} is "alexey":
+        give_alexey_kit({_p})
+    else if {_charid} is "ilya":
+        give_ilya_kit({_p})
+    else if {_charid} is "hacker":
+        give_hacker_kit({_p})
+    else if {_charid} is "thomas":
+        give_thomas_kit({_p})
+    else if {_charid} is "mayor":
+        give_mayor_kit({_p})
+    else if {_charid} is "sanya":
+        give_sanya_kit({_p})
+    else if {_charid} is "kirill":
+        give_kirill_kit({_p})
+    else if {_charid} is "dartikil":
+        give_dartikil_kit({_p})
+    else:
+        give_andrey_kit({_p})

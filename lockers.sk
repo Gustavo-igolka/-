@@ -1,0 +1,43 @@
+# =========================================================
+# lockers.sk — шкафы (бочки), с контрплеем для маньяка.
+# Если хочешь другой блок под шкаф — замени слово "barrel" везде в файле.
+#
+# Выживший: первый клик — прячется (получает невидимость), второй клик —
+# выходит (снимает невидимость, Speed I 2 сек).
+# Автовыброс через 15 секунд — нельзя сидеть в шкафу вечно.
+# Маньяк: клик по шкафу "обыскивает" его — если там кто-то прячется,
+# выдёргивает его (снимает невидимость) и наносит урон.
+# =========================================================
+
+on right click on barrel:
+    if {round.active} is true:
+        set {_p} to player
+
+        # --- Убийца обыскивает шкаф ---
+        if isManiac({char.%{_p}%}) is true:
+            loop all players:
+                set {_s} to loop-player
+                if {locker.%{_s}%} is set:
+                    if {locker.%{_s}%} is location of event-block:
+                        delete {locker.%{_s}%}
+                        remove invisibility from {_s}
+                        damage {_s} by 3
+                        send "&cТебя нашли в укрытии!" to {_s}
+                        send "&aТы нашёл прячущегося выжившего!" to {_p}
+            stop
+
+        # --- Выживший прячется / выходит ---
+        if {locker.%{_p}%} is set:
+            delete {locker.%{_p}%}
+            remove invisibility from {_p}
+            apply speed 1 to {_p} for 2 seconds
+            send "&7Ты вышел из укрытия." to {_p}
+        else:
+            set {locker.%{_p}%} to location of event-block
+            apply invisibility to {_p} for 999999 seconds
+            send "&7Ты спрятался в шкафу." to {_p}
+            wait 15 seconds
+            if {locker.%{_p}%} is set:
+                delete {locker.%{_p}%}
+                remove invisibility from {_p}
+                send "&eТы не можешь больше прятаться — вылезай!" to {_p}

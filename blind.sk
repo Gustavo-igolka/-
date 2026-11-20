@@ -1,0 +1,317 @@
+# =========================================================
+# blind.sk — Незрячий (id: blind), убийца из "Апокалипсиса".
+#
+# Что где лежит:
+#   * этот файл      — споры, след, три способности, тики;
+#   * characters.sk  — give_blind_kit(), имя, кнопка в GUI выбора убийцы;
+#   * round.sk       — isManiac(), выдача кита, очистка споров/следа;
+#   * abilities.sk   — заражение при ударе каменным мечом (в обработчике М1 убийц);
+#   * lms.sk         — общий ЛМС "Апокалипсиса" (Apokalipsis Neo);
+#   * vision.sk / levels.sk / skins.sk / guide.sk / debug.sk / dummy.sk — меню и тесты.
+#
+# СПОРЫ (состояние на выжившем):
+#   {spore.stage.%p%} — 1/2/3 (не задано = не заражён)
+#   {spore.t.%p%}     — секунд до следующей стадии
+#   {spore.near.%p%}  — сколько секунд подряд стоит рядом с заражённым
+#
+#   Стадия 1: 15 сек, без эффектов.
+#   Стадия 2: 10 сек, слепота + свечение.
+#   Стадия 3: 10 сек, тошнота + слепота + свечение, затем сам вылечивается.
+#   Таймер ничем не сбросить/не ускорить/не продлить — единственное, что
+#   снимает споры раньше, это "Прорастание" самого Незрячего.
+#   Эффекты стадии переподаются каждую секунду на 30 тиков, поэтому их нельзя
+#   "снять" чужими способностями (например, remove slowness у Андрея).
+#   Заразить можно только НЕзаражённого, но после выздоровления — снова и снова.
+#   Заражённый в 3 блоках от другого выжившего заражает его через 5 сек.
+# =========================================================
+
+# --- Сброс всего состояния спор у игрока ---
+function sporeClear(p: player):
+    delete {spore.stage.%{_p}%}
+    delete {spore.t.%{_p}%}
+    delete {spore.near.%{_p}%}
+
+# --- Заражение. Уже заражённого не трогает (таймер обновлять нельзя). ---
+function sporeInfect(t: player):
+    if {spore.stage.%{_t}%} is set:
+        stop
+    if isManiac({char.%{_t}%}) is true:
+        stop
+    set {spore.stage.%{_t}%} to 1
+    set {spore.t.%{_t}%} to 15
+    delete {spore.near.%{_t}%}
+    send "&2Ты заражён спорами!" to {_t}
+
+# --- Эффекты текущей стадии (переподаются каждую секунду). ---
+function sporeApplyEffects(p: player):
+    set {_s} to {spore.stage.%{_p}%}
+    if {_s} >= 2:
+        apply blindness to {_p} for 30 ticks
+        apply glowing to {_p} for 30 ticks
+    if {_s} >= 3:
+        apply nausea 1 to {_p} for 30 ticks
+
+# --- Тик спор: стадии + заражение от соседей. Работает всегда, но что-то
+#     делает только если кто-то заражён (споры чистятся в конце раунда). ---
+every 1 second:
+    loop all players:
+        set {_p} to loop-player
+        if {spore.stage.%{_p}%} is set:
+            remove 1 from {spore.t.%{_p}%}
+            if {spore.t.%{_p}%} <= 0:
+                if {spore.stage.%{_p}%} is 1:
+                    set {spore.stage.%{_p}%} to 2
+                    set {spore.t.%{_p}%} to 10
+                    send "&2Споры вросли глубже: слепота и свечение (10 сек)." to {_p}
+                else if {spore.stage.%{_p}%} is 2:
+                    set {spore.stage.%{_p}%} to 3
+                    set {spore.t.%{_p}%} to 10
+                    send "&4Споры на пике: тошнота, слепота и свечение (10 сек)." to {_p}
+                else:
+                    sporeClear({_p})
+                    send "&aСпоры отступили — ты здоров." to {_p}
+            if {spore.stage.%{_p}%} is set:
+                sporeApplyEffects({_p})
+
+    # --- Заражение от соседей: 5 сек подряд в 3 блоках от заражённого ---
+    delete {_inf::*}
+    loop all players:
+        if {spore.stage.%loop-player%} is set:
+            add loop-player to {_inf::*}
+    if size of {_inf::*} > 0:
+        loop all players:
+            set {_s} to loop-player
+            if {spore.stage.%{_s}%} is not set:
+                if {alive.%{_s}%} is true:
+                    if isManiac({char.%{_s}%}) is false:
+                        set {_near} to false
+                        loop size of {_inf::*} times:
+                            set {_o} to {_inf::%loop-number%}
+                            if {_o} is not {_s}:
+                                if distance between {_o} and {_s} <= 3:
+                                    set {_near} to true
+                        if {_near} is true:
+                            add 1 to {spore.near.%{_s}%}
+                            if {spore.near.%{_s}%} >= 5:
+                                sporeInfect({_s})
+                                send "&2Споры перекинулись на тебя от соседа!" to {_s}
+                        else:
+                            delete {spore.near.%{_s}%}
+
+# =========================================================
+# ПАССИВКА "След": за убийцей тянется след ~4 блока (по пути).
+# Список {blind.trail::*} — точки от старых к новым, новая точка
+# добавляется, когда убийца отошёл от предыдущей на 0.8 блока, а хвост
+# обрезается так, чтобы суммарная длина пути не превышала 4 блока.
+# Наступивший в след выживший получает отравление на 2 сек.
+# =========================================================
+function blindTrailUpdate(p: player):
+    set {_n} to size of {blind.trail::*}
+    if {_n} > 0:
+        if distance between {blind.trail::%{_n}%} and location of {_p} < 0.8:
+            stop
+    add location of {_p} to {blind.trail::*}
+    set {_n} to size of {blind.trail::*}
+    set {_len} to 0
+    set {_keepFrom} to 1
+    if {_n} > 1:
+        loop ({_n} - 1) times:
+            set {_i} to {_n} - loop-number + 1
+            set {_len} to {_len} + (distance between {blind.trail::%{_i}%} and {blind.trail::%{_i} - 1%})
+            if {_len} > 4:
+                set {_keepFrom} to {_i}
+                stop loop
+    if {_keepFrom} > 1:
+        set {_k} to {_n} - {_keepFrom} + 1
+        delete {_new::*}
+        loop {_k} times:
+            add {blind.trail::%{_keepFrom} + loop-number - 1%} to {_new::*}
+        set {blind.trail::*} to {_new::*}
+
+function blindTrailEffects(p: player):
+    # --- визуал: зелёная пыль на каждой точке следа ---
+    loop {blind.trail::*}:
+        execute console command "/particle minecraft:dust{color:[0.2,0.55,0.15],scale:1.2} %x-coord of loop-value% %y-coord of loop-value% %z-coord of loop-value% 0.35 0.15 0.35 0 3 force"
+    # --- выжившие, наступившие в след ---
+    loop all players:
+        set {_s} to loop-player
+        if {_s} is not {_p}:
+            if isManiac({char.%{_s}%}) is false:
+                if {alive.%{_s}%} is true:
+                    set {_hit} to false
+                    loop size of {blind.trail::*} times:
+                        set {_pt} to {blind.trail::%loop-number%}
+                        if distance between {_pt} and {_s} <= 1.3:
+                            set {_hit} to true
+                    if {_hit} is true:
+                        if {_s} does not have a potion effect of poison:
+                            send "&2Ты наступил в споровой след Незрячего — отравление!" to {_s}
+                        apply poison 1 to {_s} for 2 seconds
+    # --- манекены-выжившие (тест без раунда) ---
+    loop {dummy.list::*}:
+        if {dummy.kind.%loop-value%} is "survivor":
+            set {_d} to loop-value
+            set {_dhit} to false
+            loop size of {blind.trail::*} times:
+                set {_pt} to {blind.trail::%loop-number%}
+                if distance between {_pt} and {_d} <= 1.3:
+                    set {_dhit} to true
+            if {_dhit} is true:
+                set {_ok} to true
+                if {blind.dummyTrailLast} is set:
+                    if difference between {blind.dummyTrailLast} and now < 2 seconds:
+                        set {_ok} to false
+                if {_ok} is true:
+                    set {blind.dummyTrailLast} to now
+                    send "&2[DUMMY] Манекен наступил в след: отравление 2 сек." to {dummy.owner}
+
+every 5 ticks:
+    if dbgLive() is true:
+        loop all players:
+            if {char.%loop-player%} is "blind":
+                set {_go} to false
+                if {round.active} is not true:
+                    set {_go} to true
+                else if {round.live} is true:
+                    set {_go} to true
+                if {_go} is true:
+                    blindTrailUpdate(loop-player)
+                    blindTrailEffects(loop-player)
+
+# =========================================================
+# Способность 1 — Споровая завеса (green dye, КД 50 сек)
+# Зона радиусом 3 блока вокруг точки каста на 10 сек. Пока убийца внутри:
+# невидимость + Speed I (через maniacBoost — единая система скорости убийц).
+# Выжившие внутри заражаются спорами и получают замедление 1.
+# =========================================================
+function blindVeil(p: player, c: location):
+    set {_dmsg} to false
+    set {_i} to 0
+    while {_i} < 20:
+        add 1 to {_i}
+        if dbgLive() is not true:
+            stop loop
+        if {char.%{_p}%} is not "blind":
+            stop loop
+        execute console command "/particle minecraft:dust{color:[0.3,0.6,0.2],scale:2} %x-coord of {_c}% %y-coord of {_c}% %z-coord of {_c}% 1.5 0.5 1.5 0 40 force"
+        if distance between {_p} and {_c} <= 3:
+            apply invisibility to {_p} for 20 ticks
+            maniacBoost({_p}, 1, 1)
+        loop all players:
+            set {_s} to loop-player
+            if {_s} is not {_p}:
+                if isManiac({char.%{_s}%}) is false:
+                    if {alive.%{_s}%} is true:
+                        if distance between {_s} and {_c} <= 3:
+                            sporeInfect({_s})
+                            apply slowness 1 to {_s} for 20 ticks
+        loop {dummy.list::*}:
+            if {dummy.kind.%loop-value%} is "survivor":
+                if distance between loop-value and {_c} <= 3:
+                    apply slowness 1 to loop-value for 20 ticks
+                    if {_dmsg} is false:
+                        set {_dmsg} to true
+                        send "&2[DUMMY] Завеса: манекен в зоне — замедление 1 (споры на манекенах не отслеживаются)." to {dummy.owner}
+        wait 10 ticks
+    # --- Кулдаун 50 сек считается от каста; завеса длится 10 сек, ещё 40 ждём здесь.
+    #     Ждём именно в функции: wait внутри функции не блокирует вызвавший код. ---
+    wait 40 seconds
+    if {char.%{_p}%} is "blind":
+        send "&a✔ Споровая завеса снова готова!" to {_p}
+
+on right click holding green dye:
+    if {round.active} is true:
+        if {round.live} is not true:
+            cancel event
+            stop
+    if name of player's tool is "&2Споровая завеса":
+        if {char.%player%} is "blind":
+            cancel event
+            if {stunned.%player%} is true:
+                send "&cТы оглушён и не можешь использовать способности!" to player
+                stop
+            if {staggered.%player%} is true:
+                send "&eТы ошеломлён и не можешь использовать способности!" to player
+                stop
+            if tryCooldown(player, "blind_veil", 50) is true:
+                send "&2Споровая завеса раскрылась!" to player
+                awardXP(player, "blind", 10)
+                blindVeil(player, location of player)
+
+# =========================================================
+# Способность 2 — Слепая ярость (fermented spider eye, КД 40 сек)
+# Сила I на 3 сек, но убийца слепнет на те же 3 сек.
+# =========================================================
+on right click holding fermented spider eye:
+    if {round.active} is true:
+        if {round.live} is not true:
+            cancel event
+            stop
+    if name of player's tool is "&cСлепая ярость":
+        if {char.%player%} is "blind":
+            cancel event
+            if {stunned.%player%} is true:
+                send "&cТы оглушён и не можешь использовать способности!" to player
+                stop
+            if {staggered.%player%} is true:
+                send "&eТы ошеломлён и не можешь использовать способности!" to player
+                stop
+            if tryCooldown(player, "blind_rage", 40) is true:
+                apply strength 1 to player for 3 seconds
+                apply blindness to player for 3 seconds
+                send "&cСлепая ярость: сила, но ты ничего не видишь!" to player
+                awardXP(player, "blind", 10)
+                wait 40 seconds
+                if {char.%player%} is "blind":
+                    send "&a✔ Слепая ярость снова готова!" to player
+
+# =========================================================
+# Способность 3 — Прорастание (slime ball, КД 90 сек)
+# Снимает споры со ВСЕХ заражённых выживших в 25 блоках, но каждый получает
+# урон и замедление 2 по своей стадии: 1/2/3 сердца и 2/3/4 сек.
+# =========================================================
+function blindBurst(p: player):
+    set {_hits} to 0
+    loop all players:
+        set {_s} to loop-player
+        if {_s} is not {_p}:
+            if isManiac({char.%{_s}%}) is false:
+                if {alive.%{_s}%} is true:
+                    if {spore.stage.%{_s}%} is set:
+                        if distance between {_s} and {_p} <= 25:
+                            set {_st} to {spore.stage.%{_s}%}
+                            sporeClear({_s})
+                            remove blindness from {_s}
+                            remove glowing from {_s}
+                            remove nausea from {_s}
+                            set {_secs} to {_st} + 1
+                            set {_dur} to "%{_secs}% seconds" parsed as timespan
+                            apply slowness 2 to {_s} for {_dur}
+                            damage {_s} by {_st}
+                            send "&4Споры прорвались наружу! Урон: %{_st}% сердц." to {_s}
+                            add 1 to {_hits}
+    if {_hits} > 0:
+        send "&aПрорастание: споры сняты с выживших (%{_hits}%), все получили урон." to {_p}
+    else:
+        send "&7Прорастание: в 25 блоках нет заражённых." to {_p}
+    awardXP({_p}, "blind", 10 + (30 * {_hits}))
+
+on right click holding slime ball:
+    if {round.active} is true:
+        if {round.live} is not true:
+            cancel event
+            stop
+    if name of player's tool is "&aПрорастание":
+        if {char.%player%} is "blind":
+            cancel event
+            if {stunned.%player%} is true:
+                send "&cТы оглушён и не можешь использовать способности!" to player
+                stop
+            if {staggered.%player%} is true:
+                send "&eТы ошеломлён и не можешь использовать способности!" to player
+                stop
+            if tryCooldown(player, "blind_burst", 90) is true:
+                blindBurst(player)
+                wait 90 seconds
+                if {char.%player%} is "blind":
+                    send "&a✔ Прорастание снова готово!" to player

@@ -1,0 +1,85 @@
+# =========================================================
+# lobbyitems.sk — меню через предметы в хотбаре (вместо команд в чат),
+# для ОБЫЧНЫХ игроков, не админ-инструмент.
+# Семь НЕЗАВИСИМЫХ друг от друга предметов:
+#   Салатовый краситель — Выбор Выжившего   (открывает GUI /choosesurvivor)
+#   Незеритовая звезда  — Выбор Убийцы      (открывает GUI /choosemaniac)
+#   Книга               — Лвл               (то же самое, что /levels)
+#   Пороховая пыль      — Злоба             (то же самое, что /anger)
+#   Изумруд             — Деньги            (то же самое, что /money)
+#   Золотой слиток       — Магазин скинов    (то же самое, что /skinshop)
+#   Аметистовый осколок  — Выбор скина       (то же самое, что /skins)
+#
+# ВАЖНО: раньше вместо карты стоял compass — убрано, т.к. компас на серверах
+# с WorldEdit по умолчанию является "Navigation Wand" (правый клик —
+# raycast-телепорт по направлению взгляда для тех, у кого есть право
+# worldedit.navigation.*), и конфликтовал с нашим меню. Потом вместо
+# компаса поставили пустую карту (map) — тоже убрано: правый клик пустой
+# картой по игроку триггерит ванильный механизм активации/клонирования
+# карты, предмет фактически подменяется на другой (без нужного имени), из-за
+# чего GUI переставало открываться, а выбор персонажа блокировался. Теперь
+# краситель — простой предмет без скрытой ванильной механики. Если решишь
+# менять материал ещё раз — избегай также golden/wooden axe (Selection Wand
+# WorldEdit по умолчанию), это же правило.
+#
+# Жизненный цикл: выдаются on join и в stopRound(), пока {round.active}
+# ложно (т.е. только в лобби). При /startround убираются у ВСЕХ игроков —
+# у тех, кому назначена роль, это происходит через "clear inventory" внутри
+# give_X_kit(), у зрителей без роли — явной очисткой в самом round.sk.
+# =========================================================
+
+function giveLobbyItems(p: player):
+    give lime dye named "&a&lВыбор: Выживший" to {_p}
+    give nether star named "&c&lВыбор: Убийца" to {_p}
+    give book named "&5&lУровни" to {_p}
+    give blaze powder named "&6&lЗлоба" to {_p}
+    give emerald named "&a&lДеньги" to {_p}
+    give gold ingot named "&6&lМагазин скинов" to {_p}
+    give amethyst shard named "&d&lВыбор скина" to {_p}
+    give heart of the sea named "&b&lСправочник" to {_p}
+
+on right click holding lime dye:
+    if name of player's tool is "&a&lВыбор: Выживший":
+        cancel event
+        openSurvivorChoiceMenu(player)
+
+on right click holding nether star:
+    if name of player's tool is "&c&lВыбор: Убийца":
+        cancel event
+        openManiacChoiceMenu(player)
+
+on right click holding book:
+    if name of player's tool is "&5&lУровни":
+        cancel event
+        make player execute command "/levels"
+
+on right click holding blaze powder:
+    if name of player's tool is "&6&lЗлоба":
+        cancel event
+        make player execute command "/anger"
+
+on right click holding emerald:
+    if name of player's tool is "&a&lДеньги":
+        cancel event
+        make player execute command "/money"
+
+on right click holding gold ingot:
+    if name of player's tool is "&6&lМагазин скинов":
+        cancel event
+        openSkinCharSelect(player, "shop")
+
+on right click holding amethyst shard:
+    if name of player's tool is "&d&lВыбор скина":
+        cancel event
+        openSkinCharSelect(player, "select")
+
+on right click holding heart of the sea:
+    if name of player's tool is "&b&lСправочник":
+        cancel event
+        openGuideMenu(player)
+
+# Меню-предметы нельзя выбросить/потерять (Q или перетаскивание за пределы инвентаря)
+on drop:
+    if name of event-item is "&a&lВыбор: Выживший" or "&c&lВыбор: Убийца" or "&5&lУровни" or "&6&lЗлоба" or "&a&lДеньги" or "&6&lМагазин скинов" or "&d&lВыбор скина" or "&b&lСправочник":
+        cancel event
+
