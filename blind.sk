@@ -46,7 +46,7 @@ function sporeInfect(t: player):
 function sporeApplyEffects(p: player):
     set {_s} to {spore.stage.%{_p}%}
     if {_s} >= 2:
-        apply blindness to {_p} for 30 ticks
+        execute console command "minecraft:effect give %name of {_p}% minecraft:blindness 2 0 true"
         apply glowing to {_p} for 30 ticks
     if {_s} >= 3:
         apply nausea 1 to {_p} for 30 ticks
@@ -258,7 +258,7 @@ on right click holding fermented spider eye:
                 stop
             if tryCooldown(player, "blind_rage", 40) is true:
                 apply strength 1 to player for 3 seconds
-                apply blindness to player for 3 seconds
+                execute console command "minecraft:effect give %name of player% minecraft:blindness 3 0 true"
                 send "&cСлепая ярость: сила, но ты ничего не видишь!" to player
                 awardXP(player, "blind", 10)
                 wait 40 seconds
