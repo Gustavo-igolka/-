@@ -2146,26 +2146,15 @@ function projectSlowWalk(p: player, speed: number, d: timespan):
 #     поэтому во время стана/заморозки сбрасываем горизонтальную скорость.
 #     Вертикаль не трогаем — падение с высоты работает как обычно. ---
 every 1 tick:
-    delete {project.freezeLockReset}
     loop all players:
-        set {_p} to loop-player
-        # Стан (stunPlayer) — через walk speed 0 + freezeToken
-        # Оглушение маньяка (freezeManiacWalk) — walk speed 0 без токена
-        if {project.freezeToken.%{_p}%} is set or walk speed of {_p} is 0:
-            # Skript (Bukkit) не умеет менять скорость игрока напрямую
-            # ("velocity" — только для чтения, "horizontal velocity"
-            # отсутствует). Поэтому при прыжке замороженного игрока
-            # ставим его на его же текущую позицию: телепорт сбрасывает
-            # горизонтальный импульс (X/Z), а вертикаль (Y) не трогается —
-            # гравитация и падение с высоты работают как обычно.
-            # Флаг freezeLockReset гарантирует, что за один тик выполнится
-            # только один такой "нулевой" телепорт (безопасно даже если в
-            # будущем появится обработчик on teleport).
-            set {_vv} to vertical velocity of {_p}
-            if {_vv} is greater than 0:
-                if {project.freezeLockReset} is not true:
-                    set {project.freezeLockReset} to true
-                    teleport {_p} to location of {_p}
+        # Стан/заморозка (projectSlowWalk, Челюсти) — freezeToken + walk speed 0.
+        # Проверяем сразу у loop-player (без промежуточной переменной),
+        # т.к. Skript не принимает составное условие "if A is set or B is 0"
+        # и свойство "horizontal velocity".
+        if {project.freezeToken.%loop-player%} is set:
+            teleport loop-player to location of loop-player
+        else if walk speed of loop-player is 0:
+            teleport loop-player to location of loop-player
 
 # ===========================================================
 # Способность 1 — Челюсти (bone, КД 40 сек)
