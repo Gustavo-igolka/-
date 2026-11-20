@@ -2602,11 +2602,13 @@ on right click holding iron axe:
                 if loop-player is not player:
                     if isManiac({char.%loop-player%}) is false:
                         if {alive.%loop-player%} is true:
-                            set {_d} to distance between player and loop-player
-                            if {_d} <= 3:
-                                if {_d} < {_best}:
-                                    set {_best} to {_d}
-                                    set {_target} to loop-player
+                            if {stunned.%loop-player%} is not true:
+                                if {staggered.%loop-player%} is not true:
+                                    set {_d} to distance between player and loop-player
+                                    if {_d} <= 3:
+                                        if {_d} < {_best}:
+                                            set {_best} to {_d}
+                                            set {_target} to loop-player
             if {_target} is not set:
                 send "&7Рядом нет выжившего для захвата (радиус 3 блока)." to player
                 stop
