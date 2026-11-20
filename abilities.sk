@@ -161,6 +161,14 @@ function stunPlayer(p: player, duration: timespan):
     delete {stunShield.%{_p}%}
     send "&b✔ Щит от станов спал." to {_p}
 
+# --- ЖЁСТКАЯ БЛОКИРОВКА СТАНА ---
+# walk speed = 0 сам по себе не запрещает все перемещения:
+# прыжок/инерция/отбрасывание могут продолжать сдвигать игрока.
+# PlayerMoveEvent отменяет любое обычное перемещение, пока активен стан.
+on player move:
+    if {stunned.%player%} is true:
+        cancel event
+
 function staggerPlayer(p: player, duration: timespan):
     set {staggered.%{_p}%} to true
     send "&eТы ошеломлён — способности временно недоступны!" to {_p}
