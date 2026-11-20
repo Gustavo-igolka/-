@@ -2147,12 +2147,15 @@ function projectSlowWalk(p: player, speed: number, d: timespan):
 #     Вертикаль не трогаем — падение с высоты работает как обычно. ---
 every 1 tick:
     loop all players:
+        # В цикле loop-player не поддерживается как цель для velocity,
+        # поэтому копируем его в локальную переменную.
+        set {_p} to loop-player
         # Стан (stunPlayer) — через walk speed 0 + freezeToken
-        if {project.freezeToken.%loop-player%} is set:
-            set horizontal velocity of loop-player to 0
+        if {project.freezeToken.%{_p}%} is set:
+            set horizontal velocity of {_p} to vector(0, 0, 0)
         # Оглушение маньяка (freezeManiacWalk) — walk speed 0 без токена
-        else if walk speed of loop-player is 0:
-            set horizontal velocity of loop-player to 0
+        else if walk speed of {_p} is 0:
+            set horizontal velocity of {_p} to vector(0, 0, 0)
 
 # ===========================================================
 # Способность 1 — Челюсти (bone, КД 40 сек)
