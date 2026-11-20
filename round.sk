@@ -706,6 +706,7 @@ function stopRound(message: text):
     delete {samurai.grabbing::*}
     delete {samurai.grabbed::*}
     delete {samurai.switching::*}
+    delete {samurai.switchToken::*}
     delete {samurai.stunImmune::*}
     delete {samurai.blessedStunnedUntil::*}
     delete {samurai.grabTarget::*}
