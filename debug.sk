@@ -54,8 +54,10 @@ command /debugchar <text>:
             give_project_kit({_p})
         else if {_id} is "blind":
             give_blind_kit({_p})
+        else if {_id} is "samurai":
+            give_samurai_kit({_p})
         else:
-            send "&cНеизвестный id. Варианты: denden, necromancer, anomaly, project, blind, andrey, mihuilong, alexey, ilya, hacker, thomas, mayor, sanya, kirill, dartikil" to {_p}
+            send "&cНеизвестный id. Варианты: denden, necromancer, anomaly, project, blind, andrey, mihuilong, alexey, ilya, hacker, thomas, mayor, sanya, kirill, dartikil, samurai" to {_p}
             stop
         set {char.%{_p}%} to {_id}
         applyCharacterSkin({_p}, {_id})
