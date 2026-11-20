@@ -128,6 +128,9 @@ function countAliveGuards() :: number:
     return {_count}
 
 function stunPlayer(p: player, duration: timespan):
+    if {samurai.grabbing.%{_p}%} is true:
+        send "&5Захват защищает Самурая от оглушения!" to {_p}
+        stop
     if {samurai.stunImmune.%{_p}%} is true:
         send "&5Переключение защитило Самурая от оглушения!" to {_p}
         stop
@@ -2749,7 +2752,7 @@ on damage:
 # Смерть/выход любой стороны немедленно прерывает захват.
 on death of a player:
     if {samurai.grabbed.%victim%} is true:
-        set {_owner} to ""
+        delete {_owner}
         loop all players:
             if {samurai.grabTarget.%loop-player%} is victim:
                 set {_owner} to loop-player
