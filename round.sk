@@ -37,11 +37,36 @@ function isManiac(charid: text) :: boolean:
 function clearWaitHolograms():
     execute console command "kill @e[type=minecraft:text_display,tag=asim_wait_info]"
 
-function spawnWaitHologram(loc: location, mapName: text, killerName: text):
+function spawnWaitHologram(loc: location, content: text):
     set {_x} to x-coordinate of {_loc}
     set {_y} to y-coordinate of {_loc} + 2
     set {_z} to z-coordinate of {_loc}
-    execute console command "summon minecraft:text_display %{_x}% %{_y}% %{_z}% {Tags:['asim_wait_info'],billboard:'center',background:0,line_width:300,text:'{""text"":""Карта: %{_mapName}%\\nУбийца: %{_killerName}%"",""color"":""gold"",""bold"":true}'}"
+    execute console command "summon minecraft:text_display %{_x}% %{_y}% %{_z}% {Tags:['asim_wait_info'],billboard:'center',background:0,line_width:300,text:'{""text"":""%{_content}%"",""color"":""gold"",""bold"":true}'}"
+
+# Официальные классы выживших для информационной голограммы убийцы.
+function getSurvivorClassDisplayName(charid: text) :: text:
+    if {_charid} is "andrey":
+        return "Выживальшик / Рашер"
+    else if {_charid} is "hacker":
+        return "Выживальшик / Рашер"
+    else if {_charid} is "kirill":
+        return "Выживальшик / Рашер"
+    else if {_charid} is "mihuilong":
+        return "Страж"
+    else if {_charid} is "ilya":
+        return "Страж"
+    else if {_charid} is "mayor":
+        return "Страж"
+    else if {_charid} is "dartikil":
+        return "Страж"
+    else if {_charid} is "alexey":
+        return "Поддержка"
+    else if {_charid} is "thomas":
+        return "Поддержка"
+    else if {_charid} is "sanya":
+        return "Поддержка"
+    else:
+        return "Неизвестный класс"
 
 # --- Режим "Время": общий таймер раунда, показан всем боссбаром вместо
 #     старой системы "почини N генераторов". Формула на старте: 70 сек +
@@ -405,8 +430,29 @@ command /startround <text>:
             else if {char.%{_p}%} is set:
                 teleport {_p} to {wait.survivor.spawn}
 
-        spawnWaitHologram({wait.maniac.spawn}, {_map}, "%{_killer}%")
-        spawnWaitHologram({wait.survivor.spawn}, {_map}, "%{_killer}%")
+        # Формируем сведения после назначения персонажей: убийца видит весь состав
+        # выживших с официальными классами, а выжившие — карту и персонажа-убийцу.
+        set {_killerDisplayName} to getCharDisplayName({char.%{_killer}%})
+        delete {_survivorLines::*}
+        set {_survivorCount} to 0
+        loop all players:
+            set {_p} to loop-player
+            if {char.%{_p}%} is set:
+                if isManiac({char.%{_p}%}) is false:
+                    add 1 to {_survivorCount}
+                    set {_survivorDisplayName} to getCharDisplayName({char.%{_p}%})
+                    set {_survivorClass} to getSurvivorClassDisplayName({char.%{_p}%})
+                    add "%{_survivorDisplayName}% — %{_survivorClass}%" to {_survivorLines::*}
+
+        set {_survivorList} to join {_survivorLines::*} with "\\n"
+        if {_survivorList} is "":
+            set {_survivorList} to "Нет назначенных выживших"
+
+        set {_killerRoomInfo} to "ИНФОРМАЦИЯ О РАУНДЕ\\n\\nУБИЙЦА\\n%{_killerDisplayName}%\\n\\nКАРТА: %{_map}%\\n\\nВЫЖИВШИЕ (%{_survivorCount}%):\\n%{_survivorList}%"
+        set {_survivorRoomInfo} to "ИНФОРМАЦИЯ О РАУНДЕ\\n\\nКАРТА: %{_map}%\\n\\nУГРОЗА\\n%{_killerDisplayName}%"
+
+        spawnWaitHologram({wait.maniac.spawn}, {_killerRoomInfo})
+        spawnWaitHologram({wait.survivor.spawn}, {_survivorRoomInfo})
         broadcast "&7Приготовьтесь..."
         if {debug.mode} is true:
             wait 2 seconds
