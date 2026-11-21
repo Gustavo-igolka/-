@@ -528,10 +528,20 @@ command /startround <text>:
         loop all players:
             set gamemode of loop-player to adventure
 
-        # --- Авто-ЛМС: если на сервере всего 2 человека, сразу финальная дуэль ---
+        # --- Авто-ЛМС для двух игроков.
+        # Если единственный выживший — заряженный Илья, сначала даём ему
+        # использовать возрождение. ЛМС начнётся после его возвращения.
         if size of all players is 2:
             if {round.survivorsAlive} is 1:
-                startFinalDuel()
+                set {_delayIlyaLms} to false
+                loop all players:
+                    if {alive.%loop-player%} is true:
+                        if {char.%loop-player%} is "ilya":
+                            if {ilya.reviveUsed.%loop-player%} is not true:
+                                if {ilya_charged.%loop-player%} is true:
+                                    set {_delayIlyaLms} to true
+                if {_delayIlyaLms} is false:
+                    startFinalDuel()
 
 command /endround:
     permission: op
@@ -621,6 +631,11 @@ on respawn:
                 set {ilya_charged.%player%} to false
                 set {ilya_stunCount.%player%} to 0
                 set {ilya.reviveUsed.%player%} to true
+                # В матче ровно на двух игроков ЛМС начинается только после
+                # завершения возрождения Ильи, а не до его смерти.
+                if size of all players is 2:
+                    if {round.survivorsAlive} is 1:
+                        startFinalDuel()
             else if isManiac({char.%player%}) is false:
                 if {alive.%player%} is false:
                     delete {armorHidden.%player%}
