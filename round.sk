@@ -32,6 +32,17 @@ function isManiac(charid: text) :: boolean:
     else:
         return false
 
+
+# --- Голограммы комнат ожидания (Minecraft 1.19.4+) ---
+function clearWaitHolograms():
+    execute console command "kill @e[type=minecraft:text_display,tag=asim_wait_info]"
+
+function spawnWaitHologram(loc: location, mapName: text, killerName: text):
+    set {_x} to x-coordinate of {_loc}
+    set {_y} to y-coordinate of {_loc} + 2
+    set {_z} to z-coordinate of {_loc}
+    execute console command "summon minecraft:text_display %{_x}% %{_y}% %{_z}% {Tags:['asim_wait_info'],billboard:'center',background:0,line_width:300,text:'{""text"":""Карта: %{_mapName}%\\nУбийца: %{_killerName}%"",""color"":""gold"",""bold"":true}'}"
+
 # --- Режим "Время": общий таймер раунда, показан всем боссбаром вместо
 #     старой системы "почини N генераторов". Формула на старте: 70 сек +
 #     50 сек за каждого живого на тот момент выжившего. Дальше меняется
@@ -376,14 +387,32 @@ command /startround <text>:
                 give_samurai_kit({_p})
             applyCharacterSkin({_p}, {char.%{_p}%})
 
-        # --- Реванш-экран: показываем убийцу и карту заранее, даём время подготовиться ---
-        broadcast "&4&l☠ Убийца этого раунда: &f%{_killer}%"
-        broadcast "&e&lКарта: &f%{_map}%"
+        # --- Подготовка в отдельных комнатах ожидания: 15 секунд + голограммы ---
+        if {wait.maniac.spawn} is not set:
+            broadcast "&cНе установлена комната ожидания убийцы. Используй /setwaitmaniac."
+            stopRound("&cРаунд отменён: отсутствует комната ожидания убийцы.")
+            stop
+        if {wait.survivor.spawn} is not set:
+            broadcast "&cНе установлена комната ожидания выживших. Используй /setwaitsurvivor."
+            stopRound("&cРаунд отменён: отсутствует комната ожидания выживших.")
+            stop
+
+        clearWaitHolograms()
+        loop all players:
+            set {_p} to loop-player
+            if isManiac({char.%{_p}%}) is true:
+                teleport {_p} to {wait.maniac.spawn}
+            else if {char.%{_p}%} is set:
+                teleport {_p} to {wait.survivor.spawn}
+
+        spawnWaitHologram({wait.maniac.spawn}, {_map}, "%{_killer}%")
+        spawnWaitHologram({wait.survivor.spawn}, {_map}, "%{_killer}%")
         broadcast "&7Приготовьтесь..."
         if {debug.mode} is true:
             wait 2 seconds
         else:
-            wait 10 seconds
+            wait 15 seconds
+        clearWaitHolograms()
 
         # --- Раунд могли завершить, пока шла подготовка (например, убийца вышел) ---
         if {round.active} is not true:
@@ -653,6 +682,7 @@ function startFinalDuel():
 
 # --- Общая функция завершения раунда ---
 function stopRound(message: text):
+    clearWaitHolograms()
     set {round.active} to false
     delete {blind.trail::*}
     delete {round.maniac}
