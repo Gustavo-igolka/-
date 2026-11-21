@@ -144,16 +144,27 @@ function stunPlayer(p: player, duration: timespan):
         send "&5Дыхание сработало! Оглушение отражено." to {_p}
         maniacBoost({_p}, 5, 2)
         stop
-    # --- Прерывает любой активный "channel" Проекта (Челюсти/Хакер раш/Телепорт) ---
+    # Прерываем активный каст Проекта внешним оглушением.
     if {project.channeling.%{_p}%} is true:
         delete {project.channeling.%{_p}%}
         send "&cДействие Проекта прервано оглушением!" to {_p}
+
+    # Несколько источников могут оглушить цель почти одновременно.
+    # Храним общий срок окончания: новый стан не даёт старому потоку
+    # снять {stunned} раньше времени, а более долгий стан продлевает текущий.
+    set {_newUntil} to now + {_duration}
+    if {stunned.until.%{_p}%} is set:
+        if {stunned.until.%{_p}%} > {_newUntil}:
+            set {_newUntil} to {stunned.until.%{_p}%}
+    set {stunned.until.%{_p}%} to {_newUntil}
     set {stunned.%{_p}%} to true
     apply weakness 10 to {_p} for {_duration}
     send "&5Ты оглушён!" to {_p}
-    # --- Заморозка через walk speed (см. projectSlowWalk): сама ждёт {_duration}
-    #     и гарантированно возвращает скорость 0.2 ---
-    projectSlowWalk({_p}, 0, {_duration})
+
+    # Ожидаем именно общий срок стана, а не длительность только этого вызова.
+    while {stunned.until.%{_p}%} > now:
+        wait 1 tick
+    delete {stunned.until.%{_p}%}
     delete {stunned.%{_p}%}
     send "&5Оглушение прошло." to {_p}
 
