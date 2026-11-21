@@ -149,22 +149,13 @@ function stunPlayer(p: player, duration: timespan):
         delete {project.channeling.%{_p}%}
         send "&cДействие Проекта прервано оглушением!" to {_p}
 
-    # Несколько источников могут оглушить цель почти одновременно.
-    # Храним общий срок окончания: новый стан не даёт старому потоку
-    # снять {stunned} раньше времени, а более долгий стан продлевает текущий.
-    set {_newUntil} to now + {_duration}
-    if {stunned.until.%{_p}%} is set:
-        if {stunned.until.%{_p}%} > {_newUntil}:
-            set {_newUntil} to {stunned.until.%{_p}%}
-    set {stunned.until.%{_p}%} to {_newUntil}
     set {stunned.%{_p}%} to true
     apply weakness 10 to {_p} for {_duration}
     send "&5Ты оглушён!" to {_p}
 
-    # Ожидаем именно общий срок стана, а не длительность только этого вызова.
-    while {stunned.until.%{_p}%} > now:
-        wait 1 tick
-    delete {stunned.until.%{_p}%}
+    # Жёсткая заморозка скорости на весь срок стана.
+    # Дополнительно движение блокируется событием on player move ниже.
+    projectSlowWalk({_p}, 0, {_duration})
     delete {stunned.%{_p}%}
     send "&5Оглушение прошло." to {_p}
 
