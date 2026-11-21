@@ -95,6 +95,35 @@ function anomalyStalkBlind(p: player):
 
 # --- Убийцу нельзя ранить или убить НИЧЕМ — только оглушить/замедлить/и т.д.
 on damage:
+    # --- Возрождение Ильи без смерти: перехватываем только смертельный урон ---
+    if victim is a player:
+        if {round.active} is true:
+            if {round.live} is true:
+                if {char.%victim%} is "ilya":
+                    if {ilya_charged.%victim%} is true:
+                        if {ilya.reviveUsed.%victim%} is not true:
+                            if {ilya.reviveProcessing.%victim%} is not true:
+                                if victim's health - damage <= 0:
+                                    cancel event
+                                    set {ilya.reviveProcessing.%victim%} to true
+                                    set {ilya.reviveUsed.%victim%} to true
+                                    set {ilya_charged.%victim%} to false
+                                    set {ilya_stunCount.%victim%} to 0
+                                    wait 1 tick
+                                    set {_mark} to {ilya.mark.%victim%}
+                                    if {_mark} is not set:
+                                        if size of {map.%{round.map}%.survivor.spawns::*} > 0:
+                                            set {_mark} to {map.%{round.map}%.survivor.spawns::1}
+                                    if {_mark} is set:
+                                        teleport victim to {_mark}
+                                    set gamemode of victim to adventure
+                                    set health of victim to 6
+                                    broadcast "&5&lИлья возродился на метке, но сильно ослаблен!"
+                                    addAnger(victim, 1)
+                                    awardXP(victim, "ilya", 30)
+                                    apply glowing to victim for 15 seconds
+                                    delete {ilya.reviveProcessing.%victim%}
+                                    stop
     if {round.active} is true:
         if {round.live} is not true:
             cancel event
