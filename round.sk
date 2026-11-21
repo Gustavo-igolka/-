@@ -191,7 +191,12 @@ every 1 second:
                 else if {round.live} is true:
                     set {_go} to true
                 if {_go} is true:
-                    set {_tier} to maniacSpeedTier(loop-player)
+                    # Сталк Аномалии всегда принудительно задаёт Speed III.
+                    # Не полагаемся только на расчёт общего уровня скорости.
+                    if {anomaly.stalking.%loop-player%} is true:
+                        set {_tier} to 3
+                    else:
+                        set {_tier} to maniacSpeedTier(loop-player)
                     remove speed from loop-player
                     if {_tier} > 0:
                         apply a potion effect of speed of tier {_tier} to loop-player for 3 seconds
